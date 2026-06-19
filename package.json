@@ -1,6 +1,10 @@
 {
   "name": "ai-ppt-agent",
   "private": true,
+  "packageManager": "pnpm@11.0.7",
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "scripts": {
     "test:python": "python -m pytest -q",
     "test:web": "pnpm --filter @ai-ppt/web typecheck",

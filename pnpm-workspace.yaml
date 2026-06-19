@@ -2,3 +2,5 @@ packages:
   - apps/web
   - packages/contracts
   - packages/ui
+overrides:
+  postcss: 8.5.15
