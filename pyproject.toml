@@ -15,7 +15,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.3,<9"]
+dev = [
+  "httpx2==2.4.0",
+  "pytest>=8.3,<9",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["apps/api", "packages/contracts/python", "packages/skills/python"]
