@@ -1,0 +1,64 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "createdAt": {
+      "format": "date-time",
+      "title": "Createdat",
+      "type": "string"
+    },
+    "payload": {
+      "additionalProperties": true,
+      "title": "Payload",
+      "type": "object"
+    },
+    "projectId": {
+      "title": "Projectid",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": "1.0.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "stage": {
+      "enum": [
+        "brief",
+        "outline",
+        "visual_direction",
+        "slide_deck",
+        "render",
+        "quality",
+        "export"
+      ],
+      "title": "Stage",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "pending",
+        "draft",
+        "confirmed",
+        "failed",
+        "complete"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "version": {
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "projectId",
+    "stage",
+    "status",
+    "version",
+    "payload",
+    "createdAt"
+  ],
+  "title": "WorkflowCheckpoint",
+  "type": "object"
+}
