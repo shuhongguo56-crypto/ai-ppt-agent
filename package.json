@@ -1,0 +1,9 @@
+{
+  "name": "ai-ppt-agent",
+  "private": true,
+  "scripts": {
+    "test:python": "python -m pytest -q",
+    "test:web": "pnpm --filter @ai-ppt/web typecheck",
+    "test": "pnpm test:python && pnpm test:web"
+  }
+}
