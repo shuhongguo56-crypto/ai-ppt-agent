@@ -6,7 +6,7 @@ from .base import ContractModel
 
 
 class ProjectBrief(ContractModel):
-    project_id: str
+    project_id: str = Field(min_length=1)
     input_language: Literal["zh", "en"]
     output_language: Literal["zh", "en", "bilingual"]
     deck_type: Literal[

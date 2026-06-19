@@ -57,6 +57,17 @@ def test_project_brief_enforces_topic_length(topic: str) -> None:
         ProjectBrief(**valid_brief(topic=topic))
 
 
+@pytest.mark.parametrize("audience", ["", "x" * 501])
+def test_project_brief_enforces_audience_length(audience: str) -> None:
+    with pytest.raises(ValidationError):
+        ProjectBrief(**valid_brief(audience=audience))
+
+
+def test_project_brief_rejects_empty_project_id() -> None:
+    with pytest.raises(ValidationError):
+        ProjectBrief(**valid_brief(projectId=""))
+
+
 def test_source_pack_and_checkpoint_require_versions() -> None:
     with pytest.raises(ValidationError):
         SourcePack(projectId="project-1", sources=[])
@@ -126,16 +137,72 @@ def test_typescript_contracts_match_python_serialized_fields() -> None:
     typescript = (ROOT / "packages" / "contracts" / "typescript" / "index.ts").read_text(
         encoding="utf-8"
     )
-    expected_fields = {
-        "ProjectBrief": ProjectBrief,
-        "SourceItem": SourceItem,
-        "SourcePack": SourcePack,
-        "WorkflowCheckpoint": WorkflowCheckpoint,
+    expected_interfaces = {
+        "ProjectBrief": (
+            ProjectBrief,
+            {
+                "schemaVersion: SchemaVersion;",
+                "projectId: string;",
+                "inputLanguage: InputLanguage;",
+                "outputLanguage: OutputLanguage;",
+                "deckType: DeckType;",
+                "topic: string;",
+                "audience: string;",
+                'mode: "professional" | "one_click";',
+            },
+        ),
+        "SourceItem": (
+            SourceItem,
+            {
+                "schemaVersion: SchemaVersion;",
+                "sourceId: string;",
+                "sourceType: SourceType;",
+                "summary: string;",
+                "title?: string | null;",
+                "url?: string | null;",
+            },
+        ),
+        "SourcePack": (
+            SourcePack,
+            {
+                "schemaVersion: SchemaVersion;",
+                "projectId: string;",
+                "sources?: SourceItem[];",
+            },
+        ),
+        "WorkflowCheckpoint": (
+            WorkflowCheckpoint,
+            {
+                "schemaVersion: SchemaVersion;",
+                "projectId: string;",
+                "stage: WorkflowStage;",
+                "status: WorkflowStatus;",
+                "version: number;",
+                "payload: Record<string, unknown>;",
+                "createdAt: string;",
+            },
+        ),
     }
 
-    for interface_name, model in expected_fields.items():
+    for interface_name, (model, expected_lines) in expected_interfaces.items():
         interface = typescript.split(f"export interface {interface_name} {{", 1)[1].split("}", 1)[0]
         aliases = {field.alias or name for name, field in model.model_fields.items()}
-        assert {line.strip().split(":", 1)[0].rstrip("?") for line in interface.splitlines() if ":" in line} == aliases
+        actual_lines = {line.strip() for line in interface.splitlines() if ":" in line}
+        assert actual_lines == expected_lines
+        assert {
+            line.split(":", 1)[0].rstrip("?") for line in actual_lines
+        } == aliases
 
-    assert 'export type SchemaVersion = "1.0.0";' in typescript
+    expected_types = {
+        "SchemaVersion": '"1.0.0"',
+        "InputLanguage": '"zh" | "en"',
+        "OutputLanguage": 'InputLanguage | "bilingual"',
+        "DeckType": '"course_presentation" | "thesis_defense" | "research_report" | "business_pitch" | "case_competition"',
+        "SourceType": '"text" | "document" | "url" | "image"',
+        "WorkflowStage": '"brief" | "outline" | "visual_direction" | "slide_deck" | "render" | "quality" | "export"',
+        "WorkflowStatus": '"pending" | "draft" | "confirmed" | "failed" | "complete"',
+    }
+    for type_name, expected in expected_types.items():
+        declaration = typescript.split(f"export type {type_name} =", 1)[1].split(";", 1)[0]
+        normalized = " ".join(declaration.split()).removeprefix("| ")
+        assert normalized == expected

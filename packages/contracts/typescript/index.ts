@@ -41,7 +41,7 @@ export interface SourceItem {
 export interface SourcePack {
   schemaVersion: SchemaVersion;
   projectId: string;
-  sources: SourceItem[];
+  sources?: SourceItem[];
 }
 
 export interface WorkflowCheckpoint {
