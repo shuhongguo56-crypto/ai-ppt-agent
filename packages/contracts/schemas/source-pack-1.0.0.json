@@ -9,6 +9,8 @@
           "type": "string"
         },
         "sourceId": {
+          "minLength": 1,
+          "pattern": "\\S",
           "title": "Sourceid",
           "type": "string"
         },
@@ -23,6 +25,8 @@
           "type": "string"
         },
         "summary": {
+          "minLength": 1,
+          "pattern": "\\S",
           "title": "Summary",
           "type": "string"
         },
@@ -64,6 +68,8 @@
   "additionalProperties": false,
   "properties": {
     "projectId": {
+      "minLength": 1,
+      "pattern": "\\S",
       "title": "Projectid",
       "type": "string"
     },

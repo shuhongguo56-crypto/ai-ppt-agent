@@ -12,6 +12,8 @@
       "type": "object"
     },
     "projectId": {
+      "minLength": 1,
+      "pattern": "\\S",
       "title": "Projectid",
       "type": "string"
     },

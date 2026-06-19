@@ -1,9 +1,10 @@
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, StringConstraints
 
 
 SchemaVersion = Literal["1.0.0"]
+NonBlankString = Annotated[str, StringConstraints(min_length=1, pattern=r"\S")]
 
 
 def to_camel_case(value: str) -> str:

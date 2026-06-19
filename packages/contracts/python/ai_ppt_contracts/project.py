@@ -2,11 +2,11 @@ from typing import Literal
 
 from pydantic import Field
 
-from .base import ContractModel
+from .base import ContractModel, NonBlankString
 
 
 class ProjectBrief(ContractModel):
-    project_id: str = Field(min_length=1)
+    project_id: NonBlankString
     input_language: Literal["zh", "en"]
     output_language: Literal["zh", "en", "bilingual"]
     deck_type: Literal[
@@ -22,13 +22,13 @@ class ProjectBrief(ContractModel):
 
 
 class SourceItem(ContractModel):
-    source_id: str
+    source_id: NonBlankString
     source_type: Literal["text", "document", "url", "image"]
-    summary: str
+    summary: NonBlankString
     title: str | None = None
     url: str | None = None
 
 
 class SourcePack(ContractModel):
-    project_id: str
+    project_id: NonBlankString
     sources: list[SourceItem] = Field(default_factory=list)

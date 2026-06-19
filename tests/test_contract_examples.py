@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import subprocess
-import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
+from shutil import copytree
+from types import ModuleType
 
 import pytest
 from pydantic import ValidationError
@@ -32,6 +33,29 @@ def valid_brief(**overrides: object) -> dict[str, object]:
     }
     values.update(overrides)
     return values
+
+
+def valid_checkpoint(**overrides: object) -> dict[str, object]:
+    values: dict[str, object] = {
+        "schemaVersion": "1.0.0",
+        "projectId": "project-1",
+        "stage": "outline",
+        "status": "draft",
+        "version": 1,
+        "payload": {},
+        "createdAt": datetime.now(timezone.utc),
+    }
+    values.update(overrides)
+    return values
+
+
+def load_schema_exporter() -> ModuleType:
+    path = ROOT / "packages" / "contracts" / "scripts" / "export_schemas.py"
+    spec = spec_from_file_location("contract_schema_exporter", path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_project_brief_accepts_supported_schema_and_serializes_camel_case() -> None:
@@ -100,37 +124,97 @@ def test_source_pack_uses_isolated_default_source_lists() -> None:
 
 def test_workflow_checkpoint_enforces_positive_version() -> None:
     with pytest.raises(ValidationError):
-        WorkflowCheckpoint(
-            schemaVersion="1.0.0",
-            projectId="project-1",
-            stage="outline",
-            status="draft",
-            version=0,
-            payload={},
-            createdAt=datetime.now(timezone.utc),
-        )
+        WorkflowCheckpoint(**valid_checkpoint(version=0))
 
 
-def test_schema_export_is_deterministic_and_artifacts_are_current() -> None:
+def test_workflow_checkpoint_rejects_naive_datetime() -> None:
+    with pytest.raises(ValidationError):
+        WorkflowCheckpoint(**valid_checkpoint(createdAt=datetime(2026, 6, 20, 12, 0)))
+
+
+def test_workflow_checkpoint_aware_datetime_json_roundtrip() -> None:
+    created_at = datetime(2026, 6, 20, 12, 0, tzinfo=timezone(timedelta(hours=8)))
+    checkpoint = WorkflowCheckpoint(**valid_checkpoint(createdAt=created_at))
+
+    serialized = checkpoint.model_dump_json(by_alias=True)
+    restored = WorkflowCheckpoint.model_validate_json(serialized)
+
+    assert '"createdAt":"2026-06-20T12:00:00+08:00"' in serialized
+    assert restored.created_at == created_at
+    assert restored.created_at.utcoffset() == timedelta(hours=8)
+
+
+@pytest.mark.parametrize("invalid", ["", "   ", "\t\n"])
+@pytest.mark.parametrize(
+    ("model", "values", "field"),
+    [
+        (ProjectBrief, valid_brief(), "projectId"),
+        (SourcePack, {"schemaVersion": "1.0.0", "projectId": "project-1"}, "projectId"),
+        (WorkflowCheckpoint, valid_checkpoint(), "projectId"),
+        (
+            SourceItem,
+            {
+                "schemaVersion": "1.0.0",
+                "sourceId": "source-1",
+                "sourceType": "text",
+                "summary": "A summary",
+            },
+            "sourceId",
+        ),
+        (
+            SourceItem,
+            {
+                "schemaVersion": "1.0.0",
+                "sourceId": "source-1",
+                "sourceType": "text",
+                "summary": "A summary",
+            },
+            "summary",
+        ),
+    ],
+)
+def test_contract_identifiers_and_summary_reject_blank_values(
+    model: type[ProjectBrief | SourcePack | WorkflowCheckpoint | SourceItem],
+    values: dict[str, object],
+    field: str,
+    invalid: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        model(**(values | {field: invalid}))
+
+
+def test_schema_export_is_deterministic_and_artifacts_are_current(tmp_path: Path) -> None:
     schema_dir = ROOT / "packages" / "contracts" / "schemas"
     expected_names = {
         "project-brief-1.0.0.json",
         "source-pack-1.0.0.json",
         "workflow-checkpoint-1.0.0.json",
     }
-    before = {path.name: path.read_bytes() for path in schema_dir.glob("*.json")}
+    exporter = load_schema_exporter()
+    rendered = exporter.render_schemas()
+    exporter.write_schemas(tmp_path)
+    generated = {path.name: path.read_bytes() for path in tmp_path.glob("*.json")}
+    tracked = {path.name: path.read_bytes() for path in schema_dir.glob("*.json")}
 
-    command = [sys.executable, "packages/contracts/scripts/export_schemas.py"]
-    subprocess.run(command, cwd=ROOT, check=True)
-    first = {path.name: path.read_bytes() for path in schema_dir.glob("*.json")}
-    subprocess.run(command, cwd=ROOT, check=True)
-    second = {path.name: path.read_bytes() for path in schema_dir.glob("*.json")}
+    assert set(generated) == expected_names
+    assert generated == rendered == tracked
+    assert all(content.endswith(b"\n") for content in generated.values())
+    assert b'"projectId"' in generated["project-brief-1.0.0.json"]
+    assert b'"project_id"' not in generated["project-brief-1.0.0.json"]
 
-    assert set(first) == expected_names
-    assert first == second == before
-    assert all(content.endswith(b"\n") for content in first.values())
-    assert b'"projectId"' in first["project-brief-1.0.0.json"]
-    assert b'"project_id"' not in first["project-brief-1.0.0.json"]
+
+def test_schema_drift_check_does_not_rewrite_stale_artifact(tmp_path: Path) -> None:
+    exporter = load_schema_exporter()
+    schema_dir = ROOT / "packages" / "contracts" / "schemas"
+    copytree(schema_dir, tmp_path, dirs_exist_ok=True)
+    stale_path = tmp_path / "project-brief-1.0.0.json"
+    stale_path.write_bytes(b'{"stale": true}\n')
+    before = stale_path.read_bytes()
+
+    with pytest.raises(RuntimeError, match="project-brief-1.0.0.json"):
+        exporter.check_schemas(tmp_path)
+
+    assert stale_path.read_bytes() == before
 
 
 def test_typescript_contracts_match_python_serialized_fields() -> None:

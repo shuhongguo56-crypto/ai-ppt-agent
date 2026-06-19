@@ -1,13 +1,12 @@
-from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import AwareDatetime, Field
 
-from .base import ContractModel
+from .base import ContractModel, NonBlankString
 
 
 class WorkflowCheckpoint(ContractModel):
-    project_id: str
+    project_id: NonBlankString
     stage: Literal[
         "brief",
         "outline",
@@ -20,4 +19,4 @@ class WorkflowCheckpoint(ContractModel):
     status: Literal["pending", "draft", "confirmed", "failed", "complete"]
     version: int = Field(ge=1)
     payload: dict[str, Any]
-    created_at: datetime
+    created_at: AwareDatetime
