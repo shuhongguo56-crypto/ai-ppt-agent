@@ -36,6 +36,7 @@ export type SuggestedLayout =
   | "chart_focus"
   | "quote"
   | "closing";
+export type VisualDirectionId = "apple" | "mckinsey" | "airbnb";
 
 export interface ProjectBrief {
   schemaVersion: SchemaVersion;
@@ -114,4 +115,36 @@ export interface OutlineDecision {
   risks?: string[];
   qualityScores?: Record<string, number>;
   generatedBy: OutlineGeneratedBy;
+}
+
+export interface VisualGeneratedBy {
+  schemaVersion: SchemaVersion;
+  skillName: "Frontend-Slides";
+  skillVersion: string;
+  model: string;
+  promptHash: string;
+  generationId: string;
+  generatedAt: string;
+}
+
+export interface VisualDirection {
+  schemaVersion: SchemaVersion;
+  directionId: VisualDirectionId;
+  name: string;
+  mood: string;
+  palette: string[];
+  typography: string;
+  layoutPrinciples: string[];
+  textureLayer: string;
+  sampleSlideIntents: string[];
+  riskNotes?: string[];
+}
+
+export interface VisualDirectionDecision {
+  schemaVersion: SchemaVersion;
+  projectId: string;
+  outlineVersion: number;
+  directions: VisualDirection[];
+  selectedDirectionId?: VisualDirectionId | null;
+  generatedBy: VisualGeneratedBy;
 }

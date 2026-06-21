@@ -14,6 +14,7 @@ from ai_ppt_contracts import (
     ProjectBrief,
     SourceItem,
     SourcePack,
+    VisualDirectionDecision,
     WorkflowCheckpoint,
 )
 
@@ -107,6 +108,41 @@ def valid_outline(**overrides: object) -> dict[str, object]:
             "model": "gpt-5.4-mini",
             "promptHash": "sha256:9f4ea49a2e2a5204ce1eaad3c7dbeadef09674ca136a6a5e5e1a57fb9c1886",
             "generationId": "a" * 64,
+            "generatedAt": datetime.now(timezone.utc),
+        },
+    }
+    values.update(overrides)
+    return values
+
+
+def valid_visual_direction(**overrides: object) -> dict[str, object]:
+    direction = {
+        "schemaVersion": "1.0.0",
+        "mood": "premium",
+        "palette": ["#000000", "#FFFFFF", "#CCCCCC"],
+        "typography": "clean sans",
+        "layoutPrinciples": ["clear hierarchy", "strong grid", "low clutter"],
+        "textureLayer": "subtle glass cards",
+        "sampleSlideIntents": ["cover", "evidence", "close"],
+        "riskNotes": [],
+    }
+    values: dict[str, object] = {
+        "schemaVersion": "1.0.0",
+        "projectId": "project-1",
+        "outlineVersion": 2,
+        "directions": [
+            direction | {"directionId": "apple", "name": "Apple"},
+            direction | {"directionId": "mckinsey", "name": "McKinsey"},
+            direction | {"directionId": "airbnb", "name": "Airbnb"},
+        ],
+        "selectedDirectionId": None,
+        "generatedBy": {
+            "schemaVersion": "1.0.0",
+            "skillName": "Frontend-Slides",
+            "skillVersion": "1.0.0",
+            "model": "gpt-5.4-mini",
+            "promptHash": "sha256:0f2db8d7357e11480acfdc94ed0f3d13bfad30a6dfd58e120f1e3e14d435a0cb",
+            "generationId": "b" * 64,
             "generatedAt": datetime.now(timezone.utc),
         },
     }
@@ -236,6 +272,25 @@ def test_outline_decision_rejects_invalid_quality_gates(override: dict[str, obje
         OutlineDecision(**valid_outline(**override))
 
 
+def test_visual_direction_decision_accepts_exact_three_directions() -> None:
+    visual = VisualDirectionDecision(**valid_visual_direction(selectedDirectionId="apple"))
+
+    assert visual.schema_version == "1.0.0"
+    assert [direction.direction_id for direction in visual.directions] == [
+        "apple",
+        "mckinsey",
+        "airbnb",
+    ]
+    assert visual.selected_direction_id == "apple"
+
+
+def test_visual_direction_decision_rejects_missing_direction() -> None:
+    values = valid_visual_direction()
+    values["directions"] = values["directions"][:2]
+    with pytest.raises(ValidationError):
+        VisualDirectionDecision(**values)
+
+
 @pytest.mark.parametrize("invalid", ["", "   ", "\t\n"])
 @pytest.mark.parametrize(
     ("model", "values", "field"),
@@ -281,6 +336,7 @@ def test_schema_export_is_deterministic_and_artifacts_are_current(tmp_path: Path
         "outline-decision-1.0.0.json",
         "project-brief-1.0.0.json",
         "source-pack-1.0.0.json",
+        "visual-direction-1.0.0.json",
         "workflow-checkpoint-1.0.0.json",
     }
     exporter = load_schema_exporter()
@@ -377,6 +433,17 @@ def test_typescript_contracts_match_python_serialized_fields() -> None:
                 "createdAt: string;",
             },
         ),
+        "VisualDirectionDecision": (
+            VisualDirectionDecision,
+            {
+                "schemaVersion: SchemaVersion;",
+                "projectId: string;",
+                "outlineVersion: number;",
+                "directions: VisualDirection[];",
+                "selectedDirectionId?: VisualDirectionId | null;",
+                "generatedBy: VisualGeneratedBy;",
+            },
+        ),
     }
 
     for interface_name, (model, expected_lines) in expected_interfaces.items():
@@ -397,6 +464,7 @@ def test_typescript_contracts_match_python_serialized_fields() -> None:
         "WorkflowStage": '"brief" | "outline" | "visual_direction" | "slide_deck" | "render" | "quality" | "export"',
         "WorkflowStatus": '"pending" | "draft" | "confirmed" | "failed" | "complete"',
         "DeckLanguage": 'InputLanguage | "bilingual"',
+        "VisualDirectionId": '"apple" | "mckinsey" | "airbnb"',
     }
     for type_name, expected in expected_types.items():
         declaration = typescript.split(f"export type {type_name} =", 1)[1].split(";", 1)[0]

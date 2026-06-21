@@ -1,5 +1,6 @@
 from .outline import OutlineDecision, OutlineGeneratedBy, OutlineSlide
 from .project import ProjectBrief, SourceItem, SourcePack
+from .visual import VisualDirection, VisualDirectionDecision, VisualGeneratedBy
 from .workflow import WorkflowCheckpoint
 
 __all__ = [
@@ -9,5 +10,8 @@ __all__ = [
     "ProjectBrief",
     "SourceItem",
     "SourcePack",
+    "VisualDirection",
+    "VisualDirectionDecision",
+    "VisualGeneratedBy",
     "WorkflowCheckpoint",
 ]

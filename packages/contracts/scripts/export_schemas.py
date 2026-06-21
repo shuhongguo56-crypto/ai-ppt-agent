@@ -14,6 +14,7 @@ from ai_ppt_contracts import (  # noqa: E402
     OutlineDecision,
     ProjectBrief,
     SourcePack,
+    VisualDirectionDecision,
     WorkflowCheckpoint,
 )
 
@@ -24,6 +25,7 @@ SCHEMAS = {
     "source-pack-1.0.0.json": SourcePack,
     "outline-decision-1.0.0.json": OutlineDecision,
     "workflow-checkpoint-1.0.0.json": WorkflowCheckpoint,
+    "visual-direction-1.0.0.json": VisualDirectionDecision,
 }
 
 

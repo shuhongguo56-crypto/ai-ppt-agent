@@ -1,0 +1,213 @@
+{
+  "$defs": {
+    "VisualDirection": {
+      "additionalProperties": false,
+      "properties": {
+        "directionId": {
+          "enum": [
+            "apple",
+            "mckinsey",
+            "airbnb"
+          ],
+          "title": "Directionid",
+          "type": "string"
+        },
+        "layoutPrinciples": {
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 3,
+          "title": "Layoutprinciples",
+          "type": "array"
+        },
+        "mood": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Mood",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Name",
+          "type": "string"
+        },
+        "palette": {
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 3,
+          "title": "Palette",
+          "type": "array"
+        },
+        "riskNotes": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Risknotes",
+          "type": "array"
+        },
+        "sampleSlideIntents": {
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "maxItems": 12,
+          "minItems": 3,
+          "title": "Sampleslideintents",
+          "type": "array"
+        },
+        "schemaVersion": {
+          "const": "1.0.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "textureLayer": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Texturelayer",
+          "type": "string"
+        },
+        "typography": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Typography",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "directionId",
+        "name",
+        "mood",
+        "palette",
+        "typography",
+        "layoutPrinciples",
+        "textureLayer",
+        "sampleSlideIntents"
+      ],
+      "title": "VisualDirection",
+      "type": "object"
+    },
+    "VisualGeneratedBy": {
+      "additionalProperties": false,
+      "properties": {
+        "generatedAt": {
+          "format": "date-time",
+          "title": "Generatedat",
+          "type": "string"
+        },
+        "generationId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Generationid",
+          "type": "string"
+        },
+        "model": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Model",
+          "type": "string"
+        },
+        "promptHash": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Prompthash",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "const": "1.0.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "skillName": {
+          "const": "Frontend-Slides",
+          "title": "Skillname",
+          "type": "string"
+        },
+        "skillVersion": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Skillversion",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "skillName",
+        "skillVersion",
+        "model",
+        "promptHash",
+        "generationId",
+        "generatedAt"
+      ],
+      "title": "VisualGeneratedBy",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "directions": {
+      "items": {
+        "$ref": "#/$defs/VisualDirection"
+      },
+      "maxItems": 3,
+      "minItems": 3,
+      "title": "Directions",
+      "type": "array"
+    },
+    "generatedBy": {
+      "$ref": "#/$defs/VisualGeneratedBy"
+    },
+    "outlineVersion": {
+      "minimum": 1,
+      "title": "Outlineversion",
+      "type": "integer"
+    },
+    "projectId": {
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Projectid",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": "1.0.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "selectedDirectionId": {
+      "anyOf": [
+        {
+          "enum": [
+            "apple",
+            "mckinsey",
+            "airbnb"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Selecteddirectionid"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "projectId",
+    "outlineVersion",
+    "directions",
+    "generatedBy"
+  ],
+  "title": "VisualDirectionDecision",
+  "type": "object"
+}
