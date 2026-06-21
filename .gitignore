@@ -2,13 +2,13 @@
 .worktrees/
 node_modules/
 .next/
+.cache/
 .pytest_cache/
 __pycache__/
+*.pyc
 *.egg-info/
 .venv/
 /.local/
-/.task4-*/
-/.task5-*/
-/.task6-*/
-/.task7-*/
+/.task*-*/
 /test-tmp/
+*.tmp
