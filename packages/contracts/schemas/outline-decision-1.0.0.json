@@ -1,0 +1,306 @@
+{
+  "$defs": {
+    "OutlineGeneratedBy": {
+      "additionalProperties": false,
+      "properties": {
+        "generatedAt": {
+          "format": "date-time",
+          "title": "Generatedat",
+          "type": "string"
+        },
+        "generationId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Generationid",
+          "type": "string"
+        },
+        "model": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Model",
+          "type": "string"
+        },
+        "promptHash": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Prompthash",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "const": "1.0.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "skillName": {
+          "const": "HumanizePPT",
+          "title": "Skillname",
+          "type": "string"
+        },
+        "skillVersion": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Skillversion",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "skillName",
+        "skillVersion",
+        "model",
+        "promptHash",
+        "generationId",
+        "generatedAt"
+      ],
+      "title": "OutlineGeneratedBy",
+      "type": "object"
+    },
+    "OutlineSlide": {
+      "additionalProperties": false,
+      "properties": {
+        "citationIds": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Citationids",
+          "type": "array"
+        },
+        "constraints": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Constraints",
+          "type": "array"
+        },
+        "keyPoint": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Keypoint",
+          "type": "string"
+        },
+        "purpose": {
+          "enum": [
+            "cover",
+            "agenda",
+            "context",
+            "insight",
+            "evidence",
+            "framework",
+            "recommendation",
+            "conclusion"
+          ],
+          "title": "Purpose",
+          "type": "string"
+        },
+        "requiredAssets": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Requiredassets",
+          "type": "array"
+        },
+        "schemaVersion": {
+          "const": "1.0.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "slideIndex": {
+          "minimum": 1,
+          "title": "Slideindex",
+          "type": "integer"
+        },
+        "speakerNotesDraft": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Speakernotesdraft",
+          "type": "string"
+        },
+        "subtitle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subtitle"
+        },
+        "suggestedLayout": {
+          "enum": [
+            "hero",
+            "section",
+            "two_column",
+            "three_cards",
+            "timeline",
+            "chart_focus",
+            "quote",
+            "closing"
+          ],
+          "title": "Suggestedlayout",
+          "type": "string"
+        },
+        "talkingPoints": {
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "maxItems": 6,
+          "minItems": 1,
+          "title": "Talkingpoints",
+          "type": "array"
+        },
+        "title": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Title",
+          "type": "string"
+        },
+        "visualIntent": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Visualintent",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "slideIndex",
+        "title",
+        "purpose",
+        "keyPoint",
+        "talkingPoints",
+        "suggestedLayout",
+        "visualIntent",
+        "speakerNotesDraft"
+      ],
+      "title": "OutlineSlide",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "assetNeeds": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 40,
+      "title": "Assetneeds",
+      "type": "array"
+    },
+    "audience": {
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Audience",
+      "type": "string"
+    },
+    "citationNeeds": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 40,
+      "title": "Citationneeds",
+      "type": "array"
+    },
+    "deckType": {
+      "enum": [
+        "course_presentation",
+        "thesis_defense",
+        "research_report",
+        "business_pitch",
+        "case_competition"
+      ],
+      "title": "Decktype",
+      "type": "string"
+    },
+    "generatedBy": {
+      "$ref": "#/$defs/OutlineGeneratedBy"
+    },
+    "language": {
+      "enum": [
+        "zh",
+        "en",
+        "bilingual"
+      ],
+      "title": "Language",
+      "type": "string"
+    },
+    "narrative": {
+      "items": {
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "maxItems": 12,
+      "minItems": 3,
+      "title": "Narrative",
+      "type": "array"
+    },
+    "objective": {
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Objective",
+      "type": "string"
+    },
+    "projectId": {
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Projectid",
+      "type": "string"
+    },
+    "qualityScores": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "title": "Qualityscores",
+      "type": "object"
+    },
+    "risks": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Risks",
+      "type": "array"
+    },
+    "schemaVersion": {
+      "const": "1.0.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "slides": {
+      "items": {
+        "$ref": "#/$defs/OutlineSlide"
+      },
+      "maxItems": 30,
+      "minItems": 3,
+      "title": "Slides",
+      "type": "array"
+    },
+    "targetSlideCount": {
+      "maximum": 30,
+      "minimum": 3,
+      "title": "Targetslidecount",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "projectId",
+    "language",
+    "deckType",
+    "audience",
+    "objective",
+    "targetSlideCount",
+    "narrative",
+    "slides",
+    "generatedBy"
+  ],
+  "title": "OutlineDecision",
+  "type": "object"
+}

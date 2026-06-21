@@ -7,6 +7,7 @@ from .config import Settings, get_settings
 from .ai.fakes import FakeImageGateway, FakeTextGateway
 from .errors import PublicError
 from .persistence.sqlite import SQLiteProjectRepository
+from .routes.outline import router as outline_router
 from .routes.projects import router as projects_router
 from .routes.skills import router as skills_router
 
@@ -33,6 +34,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.text_gateway = FakeTextGateway()
     app.state.image_gateway = FakeImageGateway()
     app.include_router(projects_router, prefix="/api")
+    app.include_router(outline_router, prefix="/api")
     app.include_router(skills_router, prefix="/api")
 
     @app.exception_handler(PublicError)

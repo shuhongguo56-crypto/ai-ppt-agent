@@ -24,6 +24,10 @@ class ProjectRepository(Protocol):
 
     def latest_checkpoint(self, project_id: str) -> CheckpointRecord | None: ...
 
+    def latest_checkpoint_for_stage(
+        self, project_id: str, stage: str
+    ) -> CheckpointRecord | None: ...
+
     def put_checkpoint(
         self,
         project_id: str,

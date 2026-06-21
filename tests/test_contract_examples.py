@@ -10,6 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 from ai_ppt_contracts import (
+    OutlineDecision,
     ProjectBrief,
     SourceItem,
     SourcePack,
@@ -44,6 +45,70 @@ def valid_checkpoint(**overrides: object) -> dict[str, object]:
         "version": 1,
         "payload": {},
         "createdAt": datetime.now(timezone.utc),
+    }
+    values.update(overrides)
+    return values
+
+
+def valid_outline(**overrides: object) -> dict[str, object]:
+    slide = {
+        "schemaVersion": "1.0.0",
+        "subtitle": None,
+        "talkingPoints": ["point"],
+        "visualIntent": "premium visual",
+        "requiredAssets": [],
+        "citationIds": [],
+        "speakerNotesDraft": "speaker notes",
+        "constraints": [],
+    }
+    values: dict[str, object] = {
+        "schemaVersion": "1.0.0",
+        "projectId": "project-1",
+        "language": "bilingual",
+        "deckType": "course_presentation",
+        "audience": "Undergraduate biology students",
+        "objective": "Teach the audience clearly.",
+        "targetSlideCount": 3,
+        "narrative": ["Frame", "Explain", "Close"],
+        "slides": [
+            slide
+            | {
+                "slideIndex": 1,
+                "title": "Cover",
+                "purpose": "cover",
+                "keyPoint": "cover point",
+                "suggestedLayout": "hero",
+            },
+            slide
+            | {
+                "slideIndex": 2,
+                "title": "Evidence",
+                "purpose": "evidence",
+                "keyPoint": "evidence point",
+                "suggestedLayout": "chart_focus",
+            },
+            slide
+            | {
+                "slideIndex": 3,
+                "title": "Close",
+                "purpose": "conclusion",
+                "keyPoint": "closing point",
+                "suggestedLayout": "closing",
+            },
+        ],
+        "assetNeeds": [],
+        "citationNeeds": [],
+        "risks": [],
+        "qualityScores": {"structure": 88},
+        "generatedBy": {
+            "schemaVersion": "1.0.0",
+            "skillName": "HumanizePPT",
+            "skillVersion": "1.0.0",
+            "model": "gpt-5.4-mini",
+            "promptHash": "sha256:9f4ea49a2e2a5204ce1eaad3c7dbeadef09674ca136a6a5e5e1a57fb9c1886",
+            "generationId": "a" * 64,
+            "generatedAt": datetime.now(timezone.utc),
+        },
     }
     values.update(overrides)
     return values
@@ -144,6 +209,33 @@ def test_workflow_checkpoint_aware_datetime_json_roundtrip() -> None:
     assert restored.created_at.utcoffset() == timedelta(hours=8)
 
 
+def test_outline_decision_accepts_valid_outline() -> None:
+    outline = OutlineDecision(**valid_outline())
+
+    assert outline.schema_version == "1.0.0"
+    assert outline.target_slide_count == len(outline.slides)
+    assert outline.generated_by.skill_name == "HumanizePPT"
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"targetSlideCount": 4},
+        {
+            "slides": [
+                valid_outline()["slides"][0],
+                valid_outline()["slides"][2],
+                valid_outline()["slides"][1],
+            ]
+        },
+        {"qualityScores": {"structure": 69}},
+    ],
+)
+def test_outline_decision_rejects_invalid_quality_gates(override: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        OutlineDecision(**valid_outline(**override))
+
+
 @pytest.mark.parametrize("invalid", ["", "   ", "\t\n"])
 @pytest.mark.parametrize(
     ("model", "values", "field"),
@@ -186,6 +278,7 @@ def test_contract_identifiers_and_summary_reject_blank_values(
 def test_schema_export_is_deterministic_and_artifacts_are_current(tmp_path: Path) -> None:
     schema_dir = ROOT / "packages" / "contracts" / "schemas"
     expected_names = {
+        "outline-decision-1.0.0.json",
         "project-brief-1.0.0.json",
         "source-pack-1.0.0.json",
         "workflow-checkpoint-1.0.0.json",
@@ -233,6 +326,24 @@ def test_typescript_contracts_match_python_serialized_fields() -> None:
                 "topic: string;",
                 "audience: string;",
                 'mode: "professional" | "one_click";',
+            },
+        ),
+        "OutlineDecision": (
+            OutlineDecision,
+            {
+                "schemaVersion: SchemaVersion;",
+                "projectId: string;",
+                "language: DeckLanguage;",
+                "deckType: DeckType;",
+                "audience: string;",
+                "objective: string;",
+                "targetSlideCount: number;",
+                "narrative: string[];",
+                "slides: OutlineSlide[];",
+                "assetNeeds?: string[];",
+                "citationNeeds?: string[];",
+                "risks?: string[];",
+                "qualityScores?: Record<string, number>;","generatedBy: OutlineGeneratedBy;",
             },
         ),
         "SourceItem": (
@@ -285,6 +396,7 @@ def test_typescript_contracts_match_python_serialized_fields() -> None:
         "SourceType": '"text" | "document" | "url" | "image"',
         "WorkflowStage": '"brief" | "outline" | "visual_direction" | "slide_deck" | "render" | "quality" | "export"',
         "WorkflowStatus": '"pending" | "draft" | "confirmed" | "failed" | "complete"',
+        "DeckLanguage": 'InputLanguage | "bilingual"',
     }
     for type_name, expected in expected_types.items():
         declaration = typescript.split(f"export type {type_name} =", 1)[1].split(";", 1)[0]

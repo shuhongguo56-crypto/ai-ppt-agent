@@ -178,6 +178,22 @@ class SQLiteProjectRepository:
             ).fetchone()
         return None if row is None else self._checkpoint(row)
 
+    def latest_checkpoint_for_stage(
+        self, project_id: str, stage: str
+    ) -> CheckpointRecord | None:
+        with self._lock:
+            row = self._connected().execute(
+                """
+                SELECT project_id, stage, status, version, payload_json, created_at
+                FROM workflow_checkpoints
+                WHERE project_id = ? AND stage = ?
+                ORDER BY checkpoint_id DESC
+                LIMIT 1
+                """,
+                (project_id, stage),
+            ).fetchone()
+        return None if row is None else self._checkpoint(row)
+
     def put_checkpoint(
         self,
         project_id: str,

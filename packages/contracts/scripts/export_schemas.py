@@ -10,13 +10,19 @@ from typing import Sequence
 CONTRACTS_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CONTRACTS_ROOT / "python"))
 
-from ai_ppt_contracts import ProjectBrief, SourcePack, WorkflowCheckpoint  # noqa: E402
+from ai_ppt_contracts import (  # noqa: E402
+    OutlineDecision,
+    ProjectBrief,
+    SourcePack,
+    WorkflowCheckpoint,
+)
 
 
 OUTPUT = CONTRACTS_ROOT / "schemas"
 SCHEMAS = {
     "project-brief-1.0.0.json": ProjectBrief,
     "source-pack-1.0.0.json": SourcePack,
+    "outline-decision-1.0.0.json": OutlineDecision,
     "workflow-checkpoint-1.0.0.json": WorkflowCheckpoint,
 }
 

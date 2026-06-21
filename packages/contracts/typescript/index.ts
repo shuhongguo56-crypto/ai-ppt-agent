@@ -17,6 +17,25 @@ export type WorkflowStage =
   | "quality"
   | "export";
 export type WorkflowStatus = "pending" | "draft" | "confirmed" | "failed" | "complete";
+export type DeckLanguage = InputLanguage | "bilingual";
+export type SlidePurpose =
+  | "cover"
+  | "agenda"
+  | "context"
+  | "insight"
+  | "evidence"
+  | "framework"
+  | "recommendation"
+  | "conclusion";
+export type SuggestedLayout =
+  | "hero"
+  | "section"
+  | "two_column"
+  | "three_cards"
+  | "timeline"
+  | "chart_focus"
+  | "quote"
+  | "closing";
 
 export interface ProjectBrief {
   schemaVersion: SchemaVersion;
@@ -52,4 +71,47 @@ export interface WorkflowCheckpoint {
   version: number;
   payload: Record<string, unknown>;
   createdAt: string;
+}
+
+export interface OutlineGeneratedBy {
+  schemaVersion: SchemaVersion;
+  skillName: "HumanizePPT";
+  skillVersion: string;
+  model: string;
+  promptHash: string;
+  generationId: string;
+  generatedAt: string;
+}
+
+export interface OutlineSlide {
+  schemaVersion: SchemaVersion;
+  slideIndex: number;
+  title: string;
+  subtitle?: string | null;
+  purpose: SlidePurpose;
+  keyPoint: string;
+  talkingPoints: string[];
+  suggestedLayout: SuggestedLayout;
+  visualIntent: string;
+  requiredAssets?: string[];
+  citationIds?: string[];
+  speakerNotesDraft: string;
+  constraints?: string[];
+}
+
+export interface OutlineDecision {
+  schemaVersion: SchemaVersion;
+  projectId: string;
+  language: DeckLanguage;
+  deckType: DeckType;
+  audience: string;
+  objective: string;
+  targetSlideCount: number;
+  narrative: string[];
+  slides: OutlineSlide[];
+  assetNeeds?: string[];
+  citationNeeds?: string[];
+  risks?: string[];
+  qualityScores?: Record<string, number>;
+  generatedBy: OutlineGeneratedBy;
 }
