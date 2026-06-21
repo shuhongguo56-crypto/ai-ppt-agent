@@ -59,7 +59,7 @@ def test_offline_foundation_slice(client: TestClient) -> None:
     ]
     assert len(skills.json()["skills"]) == 2
 
-    text = FakeTextGateway().generate(
+    text = client.app.state.text_gateway.generate(
         TextRequest(
             model="gpt-5.4-mini",
             prompt=f"Summarize {project_id}",
@@ -78,7 +78,7 @@ def test_offline_foundation_slice(client: TestClient) -> None:
         width=4,
         height=3,
     )
-    image = FakeImageGateway().generate(image_request)
+    image = client.app.state.image_gateway.generate(image_request)
     assert image.model == "gpt-image-2"
     validate_png_bytes(
         image.bytes,

@@ -232,6 +232,27 @@ def test_initialize_rejects_checkpoint_schema_without_insertion_id(tmp_path) -> 
         repository.initialize()
 
 
+@pytest.mark.parametrize(
+    "projects_sql",
+    [
+        "CREATE TABLE projects (project_id INTEGER PRIMARY KEY, brief_json TEXT NOT NULL, created_at TEXT NOT NULL)",
+        "CREATE TABLE projects (project_id TEXT PRIMARY KEY, brief_json TEXT, created_at TEXT NOT NULL)",
+        "CREATE TABLE projects (project_id TEXT PRIMARY KEY, brief_json TEXT NOT NULL, created_at TEXT NOT NULL, legacy TEXT)",
+    ],
+)
+def test_initialize_rejects_incompatible_projects_schema(tmp_path, projects_sql) -> None:
+    path = tmp_path / "state.db"
+    connection = sqlite3.connect(path)
+    connection.execute(projects_sql)
+    connection.close()
+    repository = SQLiteProjectRepository(path)
+
+    with pytest.raises(RuntimeError, match="incompatible projects schema"):
+        repository.initialize()
+
+    assert repository._connection is None
+
+
 def test_checkpoint_timestamp_is_captured_after_write_lock(
     tmp_path, repository_factory, monkeypatch
 ) -> None:

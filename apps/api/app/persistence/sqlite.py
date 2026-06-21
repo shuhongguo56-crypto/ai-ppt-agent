@@ -62,11 +62,31 @@ class SQLiteProjectRepository:
                     );
                     """
                 )
+                self._validate_projects_schema(connection)
                 self._validate_checkpoint_schema(connection)
             except Exception:
                 connection.close()
                 raise
             self._connection = connection
+
+    @staticmethod
+    def _validate_projects_schema(connection: sqlite3.Connection) -> None:
+        columns = {
+            row["name"]: row for row in connection.execute("PRAGMA table_info(projects)")
+        }
+        required = {"project_id", "brief_json", "created_at"}
+        project_id = columns.get("project_id")
+        has_text_primary_key = (
+            project_id is not None
+            and project_id["type"].upper() == "TEXT"
+            and project_id["pk"] == 1
+        )
+        has_required_values = all(
+            columns.get(name) is not None and columns[name]["notnull"] == 1
+            for name in ("brief_json", "created_at")
+        )
+        if set(columns) != required or not has_text_primary_key or not has_required_values:
+            raise RuntimeError("incompatible projects schema; recreate the local database")
 
     @staticmethod
     def _validate_checkpoint_schema(connection: sqlite3.Connection) -> None:

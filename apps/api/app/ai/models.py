@@ -35,6 +35,32 @@ class FrozenDict(dict[str, Any]):
         return self
 
 
+class FrozenList(list[Any]):
+    """A JSON array that remains compatible with JSON Schema type checks."""
+
+    def __init__(self, values: list[Any] | tuple[Any, ...]) -> None:
+        list.__init__(self, (_freeze_json(value) for value in values))
+
+    def _immutable(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("sequence is immutable")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    append = _immutable
+    clear = _immutable
+    extend = _immutable
+    insert = _immutable
+    pop = _immutable
+    remove = _immutable
+    reverse = _immutable
+    sort = _immutable
+    __iadd__ = _immutable
+    __imul__ = _immutable
+
+    def __deepcopy__(self, _memo: dict[int, object]) -> FrozenList:
+        return self
+
+
 def _freeze_json(value: Any) -> Any:
     if value is None or isinstance(value, (str, bool, int)):
         return value
@@ -45,7 +71,7 @@ def _freeze_json(value: Any) -> Any:
     if isinstance(value, Mapping):
         return FrozenDict(value)
     if isinstance(value, (list, tuple)):
-        return tuple(_freeze_json(item) for item in value)
+        return FrozenList(value)
     raise TypeError("value must contain only JSON-compatible data")
 
 
@@ -76,31 +102,34 @@ class TextRequest:
     model: str
     prompt: str
     response_schema: dict[str, Any]
+    timeout_seconds: float = 30
+    max_attempts: int = 1
 
     def __post_init__(self) -> None:
         _nonblank(self.model, "model")
         _nonblank(self.prompt, "prompt")
         if not isinstance(self.response_schema, Mapping):
             raise TypeError("response_schema must be a mapping")
+        _validate_execution_controls(self.timeout_seconds, self.max_attempts)
         object.__setattr__(self, "response_schema", FrozenDict(self.response_schema))
 
 
 @dataclass(frozen=True, slots=True)
 class TextResult:
-    data: dict[str, Any]
+    data: Any
     model: str
     usage: dict[str, int]
 
     def __post_init__(self) -> None:
         _nonblank(self.model, "model")
-        if not isinstance(self.data, Mapping) or not isinstance(self.usage, Mapping):
-            raise TypeError("data and usage must be mappings")
+        if not isinstance(self.usage, Mapping):
+            raise TypeError("usage must be a mapping")
         if any(
             not isinstance(value, int) or isinstance(value, bool) or value < 0
             for value in self.usage.values()
         ):
             raise ValueError("usage values must be non-negative integers")
-        object.__setattr__(self, "data", FrozenDict(self.data))
+        object.__setattr__(self, "data", _freeze_json(self.data))
         object.__setattr__(self, "usage", FrozenDict(self.usage))
 
 
@@ -110,11 +139,31 @@ class ImageRequest:
     prompt: str
     width: int
     height: int
+    timeout_seconds: float = 30
+    max_attempts: int = 1
 
     def __post_init__(self) -> None:
         _nonblank(self.model, "model")
         _nonblank(self.prompt, "prompt")
         validate_image_dimensions(self.width, self.height)
+        _validate_execution_controls(self.timeout_seconds, self.max_attempts)
+
+
+def _validate_execution_controls(timeout_seconds: float, max_attempts: int) -> None:
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, (int, float))
+        or not math.isfinite(timeout_seconds)
+        or timeout_seconds <= 0
+        or timeout_seconds > 300
+    ):
+        raise ValueError("timeout_seconds must be finite and between 0 and 300")
+    if (
+        not isinstance(max_attempts, int)
+        or isinstance(max_attempts, bool)
+        or not 1 <= max_attempts <= 3
+    ):
+        raise ValueError("max_attempts must be between 1 and 3")
 
 
 @dataclass(frozen=True, slots=True)

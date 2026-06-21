@@ -3,8 +3,10 @@ import struct
 import zlib
 
 import pytest
+from jsonschema import Draft202012Validator
 
 from app.ai.fakes import FakeImageGateway, FakeTextGateway
+from app.ai.errors import ModelGatewayError
 from app.ai.models import ImageRequest, TextRequest
 from app.ai.protocols import ImageGateway, TextGateway
 
@@ -21,6 +23,7 @@ def test_fake_text_gateway_is_deterministic_and_json_serializable() -> None:
     second = gateway.generate(request)
 
     assert first == second
+    assert first.data["title"] == ""
     assert first.data["schemaVersion"] == "1.0.0"
     assert first.model == "gpt-5.4-mini"
     assert first.usage == {"inputTokens": 0, "outputTokens": 0}
@@ -32,7 +35,11 @@ def test_fake_text_gateway_is_deterministic_and_json_serializable() -> None:
     [
         TextRequest("gpt-5.4", "private prompt", {"type": "object"}),
         TextRequest("gpt-5.4-mini", "different prompt", {"type": "object"}),
-        TextRequest("gpt-5.4-mini", "private prompt", {"type": "array"}),
+        TextRequest(
+            "gpt-5.4-mini",
+            "private prompt",
+            {"type": "object", "properties": {"title": {"type": "string"}}},
+        ),
     ],
 )
 def test_fake_text_id_changes_when_a_meaningful_request_field_changes(
@@ -183,3 +190,100 @@ def test_fake_text_id_ignores_mapping_insertion_order() -> None:
         FakeTextGateway().generate(first).data["fakeId"]
         == FakeTextGateway().generate(second).data["fakeId"]
     )
+
+
+def test_fake_text_output_independently_validates_against_schema() -> None:
+    schema = {
+        "type": "object",
+        "required": ["title", "slides", "published", "score", "nothing"],
+        "properties": {
+            "title": {"type": "string", "minLength": 2},
+            "slides": {
+                "type": "array",
+                "minItems": 2,
+                "items": {"type": "integer", "minimum": 3},
+            },
+            "published": {"type": "boolean"},
+            "score": {"type": "number", "minimum": 1.5},
+            "nothing": {"type": "null"},
+        },
+        "additionalProperties": False,
+    }
+
+    result = FakeTextGateway().generate(TextRequest("gpt-5.4-mini", "prompt", schema))
+
+    Draft202012Validator(schema).validate(result.data)
+
+
+def test_strict_text_schema_receives_no_fake_metadata() -> None:
+    schema = {
+        "type": "object",
+        "required": ["title"],
+        "properties": {"title": {"const": "Deck"}},
+        "additionalProperties": False,
+    }
+
+    result = FakeTextGateway().generate(TextRequest("gpt-5.4-mini", "prompt", schema))
+
+    assert result.data == {"title": "Deck"}
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"type": "not-a-json-type"},
+        {
+            "type": "object",
+            "required": ["title"],
+            "properties": {},
+            "additionalProperties": False,
+        },
+        {"type": "string", "pattern": "(?!)"},
+        {"type": "integer", "minimum": 2, "maximum": 1},
+    ],
+)
+def test_invalid_or_unsatisfiable_text_schema_returns_safe_error(schema) -> None:
+    with pytest.raises(ModelGatewayError) as captured:
+        FakeTextGateway().generate(TextRequest("gpt-5.4-mini", "secret prompt", schema))
+
+    assert captured.value.code == "invalid_response_schema"
+    assert captured.value.retryable is False
+    assert "secret" not in str(captured.value)
+    assert "pattern" not in str(captured.value)
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda: TextRequest("model", "prompt", {}, timeout_seconds=0),
+        lambda: TextRequest("model", "prompt", {}, timeout_seconds=float("inf")),
+        lambda: TextRequest("model", "prompt", {}, timeout_seconds=301),
+        lambda: TextRequest("model", "prompt", {}, max_attempts=0),
+        lambda: TextRequest("model", "prompt", {}, max_attempts=4),
+        lambda: ImageRequest("gpt-image-2", "prompt", 1, 1, timeout_seconds=0),
+        lambda: ImageRequest("gpt-image-2", "prompt", 1, 1, max_attempts=4),
+    ],
+)
+def test_requests_reject_invalid_execution_controls(factory) -> None:
+    with pytest.raises(ValueError):
+        factory()
+
+
+def test_execution_controls_have_defaults_and_affect_fake_outputs() -> None:
+    text_default = TextRequest("model", "prompt", {"type": "object"})
+    text_changed = TextRequest(
+        "model", "prompt", {"type": "object"}, timeout_seconds=31, max_attempts=2
+    )
+    image_default = ImageRequest("gpt-image-2", "prompt", 1, 1)
+    image_changed = ImageRequest(
+        "gpt-image-2", "prompt", 1, 1, timeout_seconds=31, max_attempts=2
+    )
+
+    assert (text_default.timeout_seconds, text_default.max_attempts) == (30, 1)
+    assert (image_default.timeout_seconds, image_default.max_attempts) == (30, 1)
+    assert FakeTextGateway().generate(text_default) != FakeTextGateway().generate(
+        text_changed
+    )
+    assert FakeImageGateway().generate(image_default).bytes != FakeImageGateway().generate(
+        image_changed
+    ).bytes

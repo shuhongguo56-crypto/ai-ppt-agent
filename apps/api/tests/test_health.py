@@ -6,6 +6,8 @@ from pydantic import ValidationError
 from app.config import Settings
 from app.errors import PublicError
 from app.main import create_app
+from app.ai.fakes import FakeImageGateway, FakeTextGateway
+from app.ai.protocols import ImageGateway, TextGateway
 
 
 def test_health_reports_exact_service_version(client: TestClient) -> None:
@@ -33,15 +35,15 @@ def test_retry_count_rejects_values_outside_boundaries(retry_count: int) -> None
 def test_settings_parse_prefixed_environment_without_leaking_between_instances(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("AI_PPT_MODEL_BACKEND", "local-test")
+    monkeypatch.setenv("AI_PPT_MODEL_BACKEND", "fake")
     monkeypatch.setenv("AI_PPT_MODEL_RETRY_COUNT", "3")
 
     from_environment = Settings()
-    explicit = Settings(model_backend="explicit", model_retry_count=1)
+    explicit = Settings(model_backend="fake", model_retry_count=1)
 
-    assert from_environment.model_backend == "local-test"
+    assert from_environment.model_backend == "fake"
     assert from_environment.model_retry_count == 3
-    assert explicit.model_backend == "explicit"
+    assert explicit.model_backend == "fake"
     assert explicit.model_retry_count == 1
 
     monkeypatch.delenv("AI_PPT_MODEL_BACKEND")
@@ -50,6 +52,23 @@ def test_settings_parse_prefixed_environment_without_leaking_between_instances(
     defaults = Settings()
     assert defaults.model_backend == "fake"
     assert defaults.model_retry_count == 1
+
+
+def test_settings_reject_unsupported_model_backend() -> None:
+    with pytest.raises(ValidationError):
+        Settings(model_backend="provider")
+
+
+def test_create_app_injects_independent_fake_gateways(tmp_path) -> None:
+    first = create_app(Settings(database_path=tmp_path / "first.db"))
+    second = create_app(Settings(database_path=tmp_path / "second.db"))
+
+    assert isinstance(first.state.text_gateway, FakeTextGateway)
+    assert isinstance(first.state.text_gateway, TextGateway)
+    assert isinstance(first.state.image_gateway, FakeImageGateway)
+    assert isinstance(first.state.image_gateway, ImageGateway)
+    assert first.state.text_gateway is not second.state.text_gateway
+    assert first.state.image_gateway is not second.state.image_gateway
 
 
 def test_public_error_handler_returns_only_stable_public_fields(tmp_path) -> None:
