@@ -1,0 +1,82 @@
+{
+  "$defs": {
+    "CreditQuoteItem": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Code",
+          "type": "string"
+        },
+        "credits": {
+          "minimum": 0,
+          "title": "Credits",
+          "type": "integer"
+        },
+        "label": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Label",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "const": "1.0.0",
+          "title": "Schemaversion",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "code",
+        "label",
+        "credits"
+      ],
+      "title": "CreditQuoteItem",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "estimatedSlideCount": {
+      "maximum": 30,
+      "minimum": 3,
+      "title": "Estimatedslidecount",
+      "type": "integer"
+    },
+    "items": {
+      "items": {
+        "$ref": "#/$defs/CreditQuoteItem"
+      },
+      "maxItems": 20,
+      "minItems": 1,
+      "title": "Items",
+      "type": "array"
+    },
+    "projectId": {
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Projectid",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": "1.0.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "totalCredits": {
+      "minimum": 0,
+      "title": "Totalcredits",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "projectId",
+    "estimatedSlideCount",
+    "totalCredits",
+    "items"
+  ],
+  "title": "CreditQuote",
+  "type": "object"
+}

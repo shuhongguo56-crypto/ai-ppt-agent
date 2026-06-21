@@ -5,7 +5,9 @@ import type {
   DeckType,
   OutputLanguage,
   ProjectBrief,
+  CreditQuote,
   QualityReport,
+  SourcePack,
   RenderResult,
   VisualDirectionId,
 } from "../../../../packages/contracts/typescript";
@@ -24,6 +26,7 @@ type WorkflowState = {
   slideDeckVersion?: number;
   renderVersion?: number;
   qualityVersion?: number;
+  quote?: CreditQuote;
   renderResult?: RenderResult;
   exports: ApiExport[];
 };
@@ -68,6 +71,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export default function WorkflowClient() {
   const [topic, setTopic] = useState("CRISPR for undergraduate biology students");
+  const [sourceText, setSourceText] = useState("CRISPR enables targeted genome editing by using guide RNA and Cas enzymes. Include applications, risks, and classroom-friendly examples.");
   const [audience, setAudience] = useState("Undergraduates");
   const [deckType, setDeckType] = useState<DeckType>("course_presentation");
   const [outputLanguage, setOutputLanguage] = useState<OutputLanguage>("en");
@@ -111,13 +115,32 @@ export default function WorkflowClient() {
       });
       push("Project", `Created ${projectId}`);
 
+      const quote = await request<{ quote: CreditQuote }>(`/projects/${projectId}/credits/quote`);
+      push("Credits", `Estimated ${quote.quote.totalCredits} credits for ${quote.quote.estimatedSlideCount} slides`);
+
+      const sourcePack: SourcePack | undefined = sourceText.trim()
+        ? {
+            schemaVersion: "1.0.0",
+            projectId,
+            sources: [
+              {
+                schemaVersion: "1.0.0",
+                sourceId: "source-1",
+                sourceType: "text",
+                title: "User source notes",
+                summary: sourceText.trim().slice(0, 500),
+              },
+            ],
+          }
+        : undefined;
+
       const outline = await request<{
         version: number;
         status: "draft" | "confirmed";
         outlineDecision: unknown;
       }>(`/projects/${projectId}/outline/generate`, {
         method: "POST",
-        body: JSON.stringify({}),
+        body: JSON.stringify(sourcePack ? { sourcePack } : {}),
       });
       push("Outline", `Generated OutlineDecision v${outline.version}`);
 
@@ -180,6 +203,7 @@ export default function WorkflowClient() {
 
       setState({
         projectId,
+        quote: quote.quote,
         outlineVersion: confirmedOutline.version,
         visualVersion: selected.version,
         slideDeckVersion: deck.version,
@@ -199,8 +223,8 @@ export default function WorkflowClient() {
     <main className="workflow-page">
       <section className="workflow-shell">
         <div className="workflow-intro">
-          <a className="back-link" href="/">← Back to landing</a>
-          <p className="eyebrow">Live local workflow / 本地完整流程</p>
+          <a className="back-link" href="/">鈫?Back to landing</a>
+          <p className="eyebrow">Live local workflow / 鏈湴瀹屾暣娴佺▼</p>
           <h1>Generate a deck all the way to downloads.</h1>
           <p className="lead">
             This page calls the local FastAPI backend and runs the entire checkpointed flow in one click:
@@ -219,6 +243,10 @@ export default function WorkflowClient() {
             <label>
               Topic
               <textarea value={topic} onChange={(event) => setTopic(event.target.value)} />
+            </label>
+            <label>
+              Source notes
+              <textarea value={sourceText} onChange={(event) => setSourceText(event.target.value)} />
             </label>
             <label>
               Audience
@@ -280,8 +308,7 @@ export default function WorkflowClient() {
               <div className="download-panel">
                 <h3>Exports ready</h3>
                 <p>
-                  Project {state.projectId} · outline v{state.outlineVersion} · visual v{state.visualVersion} 路
-                  deck v{state.slideDeckVersion} · render v{state.renderVersion} · quality v{state.qualityVersion}
+                  Project {state.projectId} 路 outline v{state.outlineVersion} 路 visual v{state.visualVersion} 璺?                  deck v{state.slideDeckVersion} 路 render v{state.renderVersion} 路 quality v{state.qualityVersion}
                 </p>
                 <div className="download-actions">
                   {state.exports.map((item) => (

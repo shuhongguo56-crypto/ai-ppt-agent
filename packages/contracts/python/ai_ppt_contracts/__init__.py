@@ -1,3 +1,4 @@
+from .billing import CreditPlan, CreditQuote, CreditQuoteItem
 from .outline import OutlineDecision, OutlineGeneratedBy, OutlineSlide
 from .project import ProjectBrief, SourceItem, SourcePack
 from .quality import QualityCheckItem, QualityReport
@@ -7,6 +8,9 @@ from .visual import VisualDirection, VisualDirectionDecision, VisualGeneratedBy
 from .workflow import WorkflowCheckpoint
 
 __all__ = [
+    "CreditPlan",
+    "CreditQuote",
+    "CreditQuoteItem",
     "OutlineDecision",
     "OutlineGeneratedBy",
     "OutlineSlide",

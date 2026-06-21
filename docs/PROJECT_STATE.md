@@ -115,7 +115,7 @@ Known completed commits:
 - `e6f3476 feat: assemble canonical slide deck`
 - `d1c57ca feat: render slide deck artifacts`
 - `f9348fd feat: build bilingual workflow landing page`
-- current work: export/download endpoints, quality gate, interactive workflow UI
+- current work: export/download endpoints, quality gate, source notes, credits quote, interactive workflow UI
 
 Implemented foundation areas:
 
@@ -133,9 +133,11 @@ Implemented foundation areas:
 - `SlideDeck` contract, schema, TypeScript interface, and canonical assembly API.
 - `RenderResult` contract, schema, TypeScript interface, and local PPTX + HyperFrames HTML rendering API.
 - Bilingual Next.js landing page.
-- Interactive Next.js `/workflow` page that runs the local API chain to downloads.
+- Interactive Next.js `/workflow` page that runs the local API chain to downloads, including source notes and credits quote.
 - Export/download endpoints for PPTX and HyperFrames HTML.
 - Quality gate that validates render artifacts before export.
+- Local credits quote API and plan catalog.
+- Local start scripts for API and Web.
 
 ## Current verified status
 
@@ -148,10 +150,11 @@ As of 2026-06-21, the local-foundation branch has passed:
 
 Continue toward the actual product workflow:
 
-1. Improve PPTX rendering fidelity and HyperFrames transitions.
-2. Add production model provider adapters behind the existing safe gateway interface.
-3. Add real auth/billing/credits and persistent production storage.
-4. Add upload/source parsing and citation-backed research.
+1. Add real upload/source parsing beyond source notes.
+2. Improve PPTX rendering fidelity and HyperFrames transitions.
+3. Add production model provider adapters behind the existing safe gateway interface.
+4. Add real auth/billing/credits ledger and persistent production storage.
+5. Add citation-backed research.
 
 ## Reconnection summary for future sessions
 

@@ -2,7 +2,7 @@
 
 This repo now implements a local-first AI PPT SaaS workflow:
 
-`ProjectBrief -> OutlineDecision -> confirmed outline -> 3 visual directions -> selected direction -> canonical SlideDeck JSON -> PPTX + HyperFrames HTML render -> quality check -> export/download`.
+`ProjectBrief -> source notes -> credits quote -> OutlineDecision -> confirmed outline -> 3 visual directions -> selected direction -> canonical SlideDeck JSON -> PPTX + HyperFrames HTML render -> quality check -> export/download`.
 
 Key invariants:
 
@@ -21,16 +21,17 @@ pnpm test
 
 ## Run locally
 
-API:
+One command helper:
 
 ```powershell
-python -m uvicorn app.main:app --app-dir apps/api --reload
+.\scripts\start-local.ps1
 ```
 
-Web:
+Or run separately:
 
 ```powershell
-pnpm --filter @ai-ppt/web dev
+pnpm dev:api
+pnpm dev:web
 ```
 
 Open:

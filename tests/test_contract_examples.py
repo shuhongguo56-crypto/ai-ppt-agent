@@ -10,6 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 from ai_ppt_contracts import (
+    CreditQuote,
     OutlineDecision,
     ProjectBrief,
     QualityReport,
@@ -219,6 +220,22 @@ def valid_slide_deck(**overrides: object) -> dict[str, object]:
     return values
 
 
+def valid_credit_quote(**overrides: object) -> dict[str, object]:
+    values: dict[str, object] = {
+        "schemaVersion": "1.0.0",
+        "projectId": "project-1",
+        "estimatedSlideCount": 8,
+        "totalCredits": 52,
+        "items": [
+            {"schemaVersion": "1.0.0", "code": "outline", "label": "Outline", "credits": 10},
+            {"schemaVersion": "1.0.0", "code": "visual", "label": "Visual", "credits": 10},
+            {"schemaVersion": "1.0.0", "code": "slides", "label": "Slides", "credits": 32},
+        ],
+    }
+    values.update(overrides)
+    return values
+
+
 def valid_render_result(**overrides: object) -> dict[str, object]:
     values: dict[str, object] = {
         "schemaVersion": "1.0.0",
@@ -418,6 +435,12 @@ def valid_quality_report(**overrides: object) -> dict[str, object]:
     return values
 
 
+def test_credit_quote_requires_total_to_match_items() -> None:
+    assert CreditQuote(**valid_credit_quote()).total_credits == 52
+    with pytest.raises(ValidationError):
+        CreditQuote(**valid_credit_quote(totalCredits=999))
+
+
 def test_render_result_requires_both_outputs_from_same_deck() -> None:
     result = RenderResult(**valid_render_result())
 
@@ -495,6 +518,7 @@ def test_quality_report_aligns_passed_with_checks() -> None:
 def test_schema_export_is_deterministic_and_artifacts_are_current(tmp_path: Path) -> None:
     schema_dir = ROOT / "packages" / "contracts" / "schemas"
     expected_names = {
+        "credit-quote-1.0.0.json",
         "outline-decision-1.0.0.json",
         "project-brief-1.0.0.json",
         "quality-report-1.0.0.json",
@@ -536,6 +560,16 @@ def test_typescript_contracts_match_python_serialized_fields() -> None:
         encoding="utf-8"
     )
     expected_interfaces = {
+        "CreditQuote": (
+            CreditQuote,
+            {
+                "schemaVersion: SchemaVersion;",
+                "projectId: string;",
+                "estimatedSlideCount: number;",
+                "totalCredits: number;",
+                "items: CreditQuoteItem[];",
+            },
+        ),
         "ProjectBrief": (
             ProjectBrief,
             {
@@ -655,6 +689,7 @@ def test_typescript_contracts_match_python_serialized_fields() -> None:
 
     expected_types = {
         "SchemaVersion": '"1.0.0"',
+        "PlanId": '"free" | "student" | "plus" | "pro"',
         "InputLanguage": '"zh" | "en"',
         "OutputLanguage": 'InputLanguage | "bilingual"',
         "DeckType": '"course_presentation" | "thesis_defense" | "research_report" | "business_pitch" | "case_competition"',

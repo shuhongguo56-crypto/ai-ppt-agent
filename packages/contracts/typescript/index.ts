@@ -1,4 +1,5 @@
 export type SchemaVersion = "1.0.0";
+export type PlanId = "free" | "student" | "plus" | "pro";
 export type InputLanguage = "zh" | "en";
 export type OutputLanguage = InputLanguage | "bilingual";
 export type DeckType =
@@ -230,4 +231,28 @@ export interface QualityReport {
   renderVersion: number;
   passed: boolean;
   checks: QualityCheckItem[];
+}
+
+export interface CreditPlan {
+  schemaVersion: SchemaVersion;
+  planId: PlanId;
+  name: string;
+  monthlyPriceUsd: number;
+  credits: number;
+  description: string;
+}
+
+export interface CreditQuoteItem {
+  schemaVersion: SchemaVersion;
+  code: string;
+  label: string;
+  credits: number;
+}
+
+export interface CreditQuote {
+  schemaVersion: SchemaVersion;
+  projectId: string;
+  estimatedSlideCount: number;
+  totalCredits: number;
+  items: CreditQuoteItem[];
 }

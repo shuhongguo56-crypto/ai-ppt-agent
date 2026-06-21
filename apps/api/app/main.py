@@ -8,6 +8,7 @@ from .config import Settings, get_settings
 from .ai.fakes import FakeImageGateway, FakeTextGateway
 from .errors import PublicError
 from .persistence.sqlite import SQLiteProjectRepository
+from .routes.billing import router as billing_router
 from .routes.exports import router as exports_router
 from .routes.outline import router as outline_router
 from .routes.projects import router as projects_router
@@ -47,6 +48,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_methods=["GET", "POST", "PATCH", "PUT", "OPTIONS"],
             allow_headers=["*"],
         )
+    app.include_router(billing_router, prefix="/api")
     app.include_router(projects_router, prefix="/api")
     app.include_router(outline_router, prefix="/api")
     app.include_router(visual_router, prefix="/api")

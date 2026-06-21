@@ -11,6 +11,7 @@ CONTRACTS_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CONTRACTS_ROOT / "python"))
 
 from ai_ppt_contracts import (  # noqa: E402
+    CreditQuote,
     OutlineDecision,
     ProjectBrief,
     QualityReport,
@@ -29,6 +30,7 @@ SCHEMAS = {
     "render-result-1.0.0.json": RenderResult,
     "slide-deck-1.0.0.json": SlideDeck,
     "source-pack-1.0.0.json": SourcePack,
+    "credit-quote-1.0.0.json": CreditQuote,
     "outline-decision-1.0.0.json": OutlineDecision,
     "workflow-checkpoint-1.0.0.json": WorkflowCheckpoint,
     "visual-direction-1.0.0.json": VisualDirectionDecision,
