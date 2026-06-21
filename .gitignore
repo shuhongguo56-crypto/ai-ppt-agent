@@ -6,3 +6,9 @@ node_modules/
 __pycache__/
 *.egg-info/
 .venv/
+/.local/
+/.task4-*/
+/.task5-*/
+/.task6-*/
+/.task7-*/
+/test-tmp/

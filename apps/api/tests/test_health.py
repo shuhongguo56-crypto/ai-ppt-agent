@@ -52,8 +52,13 @@ def test_settings_parse_prefixed_environment_without_leaking_between_instances(
     assert defaults.model_retry_count == 1
 
 
-def test_public_error_handler_returns_only_stable_public_fields() -> None:
-    app: FastAPI = create_app(Settings())
+def test_public_error_handler_returns_only_stable_public_fields(tmp_path) -> None:
+    app: FastAPI = create_app(
+        Settings(
+            database_path=tmp_path / "test.db",
+            asset_path=tmp_path / "assets",
+        )
+    )
 
     @app.get("/_test/public-error")
     def raise_public_error() -> None:

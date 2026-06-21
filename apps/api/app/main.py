@@ -1,14 +1,36 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from .config import Settings, get_settings
 from .errors import PublicError
+from .persistence.sqlite import SQLiteProjectRepository
+from .routes.projects import router as projects_router
+from .routes.skills import router as skills_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved = settings or get_settings()
-    app = FastAPI(title=resolved.app_name, version=resolved.app_version)
+    repository = SQLiteProjectRepository(resolved.database_path)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        repository.initialize()
+        try:
+            yield
+        finally:
+            repository.close()
+
+    app = FastAPI(
+        title=resolved.app_name,
+        version=resolved.app_version,
+        lifespan=lifespan,
+    )
     app.state.settings = resolved
+    app.state.repository = repository
+    app.include_router(projects_router, prefix="/api")
+    app.include_router(skills_router, prefix="/api")
 
     @app.exception_handler(PublicError)
     async def public_error_handler(
