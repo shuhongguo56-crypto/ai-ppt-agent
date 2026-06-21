@@ -37,6 +37,14 @@ export type SuggestedLayout =
   | "quote"
   | "closing";
 export type VisualDirectionId = "apple" | "mckinsey" | "airbnb";
+export type SlideBlockType =
+  | "headline"
+  | "subtitle"
+  | "body"
+  | "card"
+  | "chart_placeholder"
+  | "image_placeholder"
+  | "speaker_notes";
 
 export interface ProjectBrief {
   schemaVersion: SchemaVersion;
@@ -147,4 +155,47 @@ export interface VisualDirectionDecision {
   directions: VisualDirection[];
   selectedDirectionId?: VisualDirectionId | null;
   generatedBy: VisualGeneratedBy;
+}
+
+export interface SlideDeckTheme {
+  schemaVersion: SchemaVersion;
+  directionId: VisualDirectionId;
+  name: string;
+  palette: string[];
+  typography: string;
+  textureLayer: string;
+  layoutPrinciples: string[];
+}
+
+export interface SlideBlock {
+  schemaVersion: SchemaVersion;
+  blockId: string;
+  blockType: SlideBlockType;
+  content: string;
+  role: string;
+}
+
+export interface SlideDeckSlide {
+  schemaVersion: SchemaVersion;
+  slideId: string;
+  slideIndex: number;
+  title: string;
+  subtitle?: string | null;
+  purpose: SlidePurpose;
+  layout: string;
+  visualIntent: string;
+  blocks: SlideBlock[];
+  speakerNotes: string;
+}
+
+export interface SlideDeck {
+  schemaVersion: SchemaVersion;
+  projectId: string;
+  outlineVersion: number;
+  visualDirectionVersion: number;
+  language: DeckLanguage;
+  title: string;
+  theme: SlideDeckTheme;
+  slides: SlideDeckSlide[];
+  exportTargets: ["pptx", "hyperframes_html"];
 }

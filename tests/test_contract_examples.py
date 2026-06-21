@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from ai_ppt_contracts import (
     OutlineDecision,
     ProjectBrief,
+    SlideDeck,
     SourceItem,
     SourcePack,
     VisualDirectionDecision,
@@ -145,6 +146,72 @@ def valid_visual_direction(**overrides: object) -> dict[str, object]:
             "generationId": "b" * 64,
             "generatedAt": datetime.now(timezone.utc),
         },
+    }
+    values.update(overrides)
+    return values
+
+
+def valid_slide_deck(**overrides: object) -> dict[str, object]:
+    slide = {
+        "schemaVersion": "1.0.0",
+        "subtitle": None,
+        "purpose": "evidence",
+        "layout": "chart_focus",
+        "visualIntent": "premium visual",
+        "blocks": [
+            {
+                "schemaVersion": "1.0.0",
+                "blockId": "block-1",
+                "blockType": "headline",
+                "content": "Headline",
+                "role": "primary",
+            },
+            {
+                "schemaVersion": "1.0.0",
+                "blockId": "block-2",
+                "blockType": "body",
+                "content": "Body",
+                "role": "support",
+            },
+        ],
+        "speakerNotes": "Notes",
+    }
+    values: dict[str, object] = {
+        "schemaVersion": "1.0.0",
+        "projectId": "project-1",
+        "outlineVersion": 2,
+        "visualDirectionVersion": 3,
+        "language": "bilingual",
+        "title": "Deck title",
+        "theme": {
+            "schemaVersion": "1.0.0",
+            "directionId": "apple",
+            "name": "Apple",
+            "palette": ["#000", "#fff", "#ccc"],
+            "typography": "clean sans",
+            "textureLayer": "subtle glass",
+            "layoutPrinciples": ["clear", "spacious", "focused"],
+        },
+        "slides": [
+            slide
+            | {
+                "slideId": "slide-1",
+                "slideIndex": 1,
+                "title": "Cover",
+                "purpose": "cover",
+                "layout": "hero",
+            },
+            slide | {"slideId": "slide-2", "slideIndex": 2, "title": "Evidence"},
+            slide
+            | {
+                "slideId": "slide-3",
+                "slideIndex": 3,
+                "title": "Close",
+                "purpose": "conclusion",
+                "layout": "closing",
+            },
+        ],
+        "exportTargets": ["pptx", "hyperframes_html"],
     }
     values.update(overrides)
     return values
@@ -291,6 +358,19 @@ def test_visual_direction_decision_rejects_missing_direction() -> None:
         VisualDirectionDecision(**values)
 
 
+def test_slide_deck_accepts_canonical_export_targets() -> None:
+    deck = SlideDeck(**valid_slide_deck())
+
+    assert deck.schema_version == "1.0.0"
+    assert deck.export_targets == ["pptx", "hyperframes_html"]
+    assert deck.theme.direction_id == "apple"
+
+
+def test_slide_deck_rejects_split_or_unordered_export_targets() -> None:
+    with pytest.raises(ValidationError):
+        SlideDeck(**valid_slide_deck(exportTargets=["hyperframes_html", "pptx"]))
+
+
 @pytest.mark.parametrize("invalid", ["", "   ", "\t\n"])
 @pytest.mark.parametrize(
     ("model", "values", "field"),
@@ -335,6 +415,7 @@ def test_schema_export_is_deterministic_and_artifacts_are_current(tmp_path: Path
     expected_names = {
         "outline-decision-1.0.0.json",
         "project-brief-1.0.0.json",
+        "slide-deck-1.0.0.json",
         "source-pack-1.0.0.json",
         "visual-direction-1.0.0.json",
         "workflow-checkpoint-1.0.0.json",
@@ -442,6 +523,20 @@ def test_typescript_contracts_match_python_serialized_fields() -> None:
                 "directions: VisualDirection[];",
                 "selectedDirectionId?: VisualDirectionId | null;",
                 "generatedBy: VisualGeneratedBy;",
+            },
+        ),
+        "SlideDeck": (
+            SlideDeck,
+            {
+                "schemaVersion: SchemaVersion;",
+                "projectId: string;",
+                "outlineVersion: number;",
+                "visualDirectionVersion: number;",
+                "language: DeckLanguage;",
+                "title: string;",
+                "theme: SlideDeckTheme;",
+                "slides: SlideDeckSlide[];",
+                'exportTargets: ["pptx", "hyperframes_html"];',
             },
         ),
     }

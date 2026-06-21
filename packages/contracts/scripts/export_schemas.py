@@ -13,6 +13,7 @@ sys.path.insert(0, str(CONTRACTS_ROOT / "python"))
 from ai_ppt_contracts import (  # noqa: E402
     OutlineDecision,
     ProjectBrief,
+    SlideDeck,
     SourcePack,
     VisualDirectionDecision,
     WorkflowCheckpoint,
@@ -22,6 +23,7 @@ from ai_ppt_contracts import (  # noqa: E402
 OUTPUT = CONTRACTS_ROOT / "schemas"
 SCHEMAS = {
     "project-brief-1.0.0.json": ProjectBrief,
+    "slide-deck-1.0.0.json": SlideDeck,
     "source-pack-1.0.0.json": SourcePack,
     "outline-decision-1.0.0.json": OutlineDecision,
     "workflow-checkpoint-1.0.0.json": WorkflowCheckpoint,

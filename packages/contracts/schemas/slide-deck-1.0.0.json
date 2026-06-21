@@ -1,0 +1,294 @@
+{
+  "$defs": {
+    "SlideBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "blockId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Blockid",
+          "type": "string"
+        },
+        "blockType": {
+          "enum": [
+            "headline",
+            "subtitle",
+            "body",
+            "card",
+            "chart_placeholder",
+            "image_placeholder",
+            "speaker_notes"
+          ],
+          "title": "Blocktype",
+          "type": "string"
+        },
+        "content": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Content",
+          "type": "string"
+        },
+        "role": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Role",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "const": "1.0.0",
+          "title": "Schemaversion",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "blockId",
+        "blockType",
+        "content",
+        "role"
+      ],
+      "title": "SlideBlock",
+      "type": "object"
+    },
+    "SlideDeckSlide": {
+      "additionalProperties": false,
+      "properties": {
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/SlideBlock"
+          },
+          "maxItems": 12,
+          "minItems": 2,
+          "title": "Blocks",
+          "type": "array"
+        },
+        "layout": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Layout",
+          "type": "string"
+        },
+        "purpose": {
+          "enum": [
+            "cover",
+            "agenda",
+            "context",
+            "insight",
+            "evidence",
+            "framework",
+            "recommendation",
+            "conclusion"
+          ],
+          "title": "Purpose",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "const": "1.0.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "slideId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Slideid",
+          "type": "string"
+        },
+        "slideIndex": {
+          "minimum": 1,
+          "title": "Slideindex",
+          "type": "integer"
+        },
+        "speakerNotes": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Speakernotes",
+          "type": "string"
+        },
+        "subtitle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subtitle"
+        },
+        "title": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Title",
+          "type": "string"
+        },
+        "visualIntent": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Visualintent",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "slideId",
+        "slideIndex",
+        "title",
+        "purpose",
+        "layout",
+        "visualIntent",
+        "blocks",
+        "speakerNotes"
+      ],
+      "title": "SlideDeckSlide",
+      "type": "object"
+    },
+    "SlideDeckTheme": {
+      "additionalProperties": false,
+      "properties": {
+        "directionId": {
+          "enum": [
+            "apple",
+            "mckinsey",
+            "airbnb"
+          ],
+          "title": "Directionid",
+          "type": "string"
+        },
+        "layoutPrinciples": {
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 3,
+          "title": "Layoutprinciples",
+          "type": "array"
+        },
+        "name": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Name",
+          "type": "string"
+        },
+        "palette": {
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 3,
+          "title": "Palette",
+          "type": "array"
+        },
+        "schemaVersion": {
+          "const": "1.0.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "textureLayer": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Texturelayer",
+          "type": "string"
+        },
+        "typography": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Typography",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "directionId",
+        "name",
+        "palette",
+        "typography",
+        "textureLayer",
+        "layoutPrinciples"
+      ],
+      "title": "SlideDeckTheme",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "exportTargets": {
+      "items": {
+        "enum": [
+          "pptx",
+          "hyperframes_html"
+        ],
+        "type": "string"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "title": "Exporttargets",
+      "type": "array"
+    },
+    "language": {
+      "enum": [
+        "zh",
+        "en",
+        "bilingual"
+      ],
+      "title": "Language",
+      "type": "string"
+    },
+    "outlineVersion": {
+      "minimum": 1,
+      "title": "Outlineversion",
+      "type": "integer"
+    },
+    "projectId": {
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Projectid",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": "1.0.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "slides": {
+      "items": {
+        "$ref": "#/$defs/SlideDeckSlide"
+      },
+      "maxItems": 30,
+      "minItems": 3,
+      "title": "Slides",
+      "type": "array"
+    },
+    "theme": {
+      "$ref": "#/$defs/SlideDeckTheme"
+    },
+    "title": {
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Title",
+      "type": "string"
+    },
+    "visualDirectionVersion": {
+      "minimum": 1,
+      "title": "Visualdirectionversion",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "projectId",
+    "outlineVersion",
+    "visualDirectionVersion",
+    "language",
+    "title",
+    "theme",
+    "slides",
+    "exportTargets"
+  ],
+  "title": "SlideDeck",
+  "type": "object"
+}
