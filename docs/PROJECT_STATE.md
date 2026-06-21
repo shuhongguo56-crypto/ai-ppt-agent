@@ -112,6 +112,9 @@ Known completed commits:
 - `3c54546 docs: add reconnection project state`
 - `496be6a feat: add outline generation workflow`
 - `f7b1fe2 feat: add visual direction workflow`
+- `e6f3476 feat: assemble canonical slide deck`
+- `d1c57ca feat: render slide deck artifacts`
+- `f9348fd feat: build bilingual workflow landing page`
 
 Implemented foundation areas:
 
@@ -126,21 +129,24 @@ Implemented foundation areas:
 - Local/offline test foundation.
 - `OutlineDecision` contract, schema, TypeScript interface, generation/edit/confirm API.
 - `VisualDirectionDecision` contract, schema, TypeScript interface, generation/select API.
+- `SlideDeck` contract, schema, TypeScript interface, and canonical assembly API.
+- `RenderResult` contract, schema, TypeScript interface, and local PPTX + HyperFrames HTML rendering API.
+- Bilingual Next.js workflow landing page.
 
 ## Current verified status
 
 As of 2026-06-21, the local-foundation branch has passed:
 
-- `python -m pytest -q -W error` — 226 passed.
+- `python -m pytest -q -W error` — 236 passed.
 - `pnpm test` — Python tests plus web/contracts TypeScript typecheck passed when bundled Python/Node/pnpm are placed on PATH.
 
 ## Next development target
 
 Continue toward the actual product workflow:
 
-1. Assemble deterministic `SlideDeck JSON` from a confirmed outline and selected visual direction.
-2. Render PPTX and HyperFrames HTML from the same deck contract.
-3. Build the bilingual Next.js workflow UI.
+1. Add download/export endpoints for generated artifacts.
+2. Build an interactive frontend workflow that calls the backend APIs instead of only showing the landing page.
+3. Improve PPTX rendering fidelity and HyperFrames transitions.
 4. Add production model provider adapters behind the existing safe gateway interface.
 
 ## Reconnection summary for future sessions
