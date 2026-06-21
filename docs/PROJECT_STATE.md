@@ -109,6 +109,9 @@ Known completed commits:
 - `b72bd5e feat: add local foundation services and model safety`
 - `5f4bdf7 test: verify offline local foundation`
 - `da0b0b7 fix: complete fake model gateway wiring`
+- `3c54546 docs: add reconnection project state`
+- `496be6a feat: add outline generation workflow`
+- `f7b1fe2 feat: add visual direction workflow`
 
 Implemented foundation areas:
 
@@ -121,28 +124,27 @@ Implemented foundation areas:
 - Deterministic fake text/image gateways.
 - Strict PNG validator.
 - Local/offline test foundation.
+- `OutlineDecision` contract, schema, TypeScript interface, generation/edit/confirm API.
+- `VisualDirectionDecision` contract, schema, TypeScript interface, generation/select API.
 
 ## Current verified status
 
 As of 2026-06-21, the local-foundation branch has passed:
 
-- `python -m pytest -q -W error` — 211 passed.
+- `python -m pytest -q -W error` — 226 passed.
 - `pnpm test` — Python tests plus web/contracts TypeScript typecheck passed when bundled Python/Node/pnpm are placed on PATH.
 
 ## Next development target
 
 Continue toward the actual product workflow:
 
-1. Implement `HumanizePPT` outline generation API.
-2. Implement outline confirm/edit APIs.
-3. Implement visual direction generation and selection.
-4. Assemble deterministic `SlideDeck JSON`.
-5. Render PPTX and HyperFrames HTML from the same deck contract.
-6. Build the bilingual Next.js workflow UI.
+1. Assemble deterministic `SlideDeck JSON` from a confirmed outline and selected visual direction.
+2. Render PPTX and HyperFrames HTML from the same deck contract.
+3. Build the bilingual Next.js workflow UI.
+4. Add production model provider adapters behind the existing safe gateway interface.
 
 ## Reconnection summary for future sessions
 
 If context is lost, remember this sentence:
 
 “We are building an international bilingual AI PPT SaaS that converts user input into a reviewed outline, three premium visual directions, one canonical SlideDeck JSON, and then both editable PPTX and HyperFrames HTML.”
-
