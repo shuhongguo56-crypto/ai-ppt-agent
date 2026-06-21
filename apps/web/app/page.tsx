@@ -123,7 +123,7 @@ export default function Home() {
           Current branch includes project creation, outline generation/confirmation, visual direction selection,
           canonical SlideDeck assembly, and local PPTX + HyperFrames HTML artifact rendering.
         </p>
-        <div className="status-pill">236 backend tests passing · TypeScript contracts passing</div>
+        <div className="status-pill">249 backend tests passing · TypeScript contracts passing</div>
       </section>
     </main>
   );

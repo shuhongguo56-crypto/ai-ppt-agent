@@ -2,13 +2,13 @@
 
 import { useMemo, useState } from "react";
 import type {
+  CreditQuote,
   DeckType,
   OutputLanguage,
   ProjectBrief,
-  CreditQuote,
   QualityReport,
-  SourcePack,
   RenderResult,
+  SourcePack,
   VisualDirectionId,
 } from "../../../../packages/contracts/typescript";
 
@@ -21,20 +21,17 @@ type ApiExport = {
 
 type WorkflowState = {
   projectId?: string;
+  quote?: CreditQuote;
   outlineVersion?: number;
   visualVersion?: number;
   slideDeckVersion?: number;
   renderVersion?: number;
   qualityVersion?: number;
-  quote?: CreditQuote;
   renderResult?: RenderResult;
   exports: ApiExport[];
 };
 
-type LogItem = {
-  label: string;
-  detail: string;
-};
+type LogItem = { label: string; detail: string };
 
 const deckTypes: DeckType[] = [
   "course_presentation",
@@ -43,11 +40,8 @@ const deckTypes: DeckType[] = [
   "business_pitch",
   "case_competition",
 ];
-
 const outputLanguages: OutputLanguage[] = ["en", "zh", "bilingual"];
-
 const directions: VisualDirectionId[] = ["apple", "mckinsey", "airbnb"];
-
 const apiBase = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000/api").replace(/\/$/, "");
 
 function apiOrigin() {
@@ -57,10 +51,7 @@ function apiOrigin() {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
     ...init,
-    headers: {
-      "content-type": "application/json",
-      ...(init?.headers ?? {}),
-    },
+    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
   });
   if (!response.ok) {
     const text = await response.text();
@@ -71,7 +62,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export default function WorkflowClient() {
   const [topic, setTopic] = useState("CRISPR for undergraduate biology students");
-  const [sourceText, setSourceText] = useState("CRISPR enables targeted genome editing by using guide RNA and Cas enzymes. Include applications, risks, and classroom-friendly examples.");
+  const [sourceText, setSourceText] = useState(
+    "CRISPR enables targeted genome editing by using guide RNA and Cas enzymes. Include applications, risks, and classroom-friendly examples.",
+  );
   const [audience, setAudience] = useState("Undergraduates");
   const [deckType, setDeckType] = useState<DeckType>("course_presentation");
   const [outputLanguage, setOutputLanguage] = useState<OutputLanguage>("en");
@@ -82,13 +75,16 @@ export default function WorkflowClient() {
   const [state, setState] = useState<WorkflowState>({ exports: [] });
 
   const canDownload = state.exports.length > 0;
-  const runLabel = useMemo(
-    () => (isRunning ? "Generating full workflow..." : "Run full local workflow"),
-    [isRunning],
-  );
+  const runLabel = useMemo(() => (isRunning ? "Generating full workflow..." : "Run full local workflow"), [isRunning]);
 
   function push(label: string, detail: string) {
     setLogs((current) => [...current, { label, detail }]);
+  }
+
+  async function importTextFile(file: File | undefined) {
+    if (!file) return;
+    const text = await file.text();
+    setSourceText(text.slice(0, 5000));
   }
 
   async function runWorkflow() {
@@ -109,10 +105,7 @@ export default function WorkflowClient() {
         mode: "professional",
       };
 
-      await request<{ projectId: string }>("/projects", {
-        method: "POST",
-        body: JSON.stringify(brief),
-      });
+      await request<{ projectId: string }>("/projects", { method: "POST", body: JSON.stringify(brief) });
       push("Project", `Created ${projectId}`);
 
       const quote = await request<{ quote: CreditQuote }>(`/projects/${projectId}/credits/quote`);
@@ -134,14 +127,10 @@ export default function WorkflowClient() {
           }
         : undefined;
 
-      const outline = await request<{
-        version: number;
-        status: "draft" | "confirmed";
-        outlineDecision: unknown;
-      }>(`/projects/${projectId}/outline/generate`, {
-        method: "POST",
-        body: JSON.stringify(sourcePack ? { sourcePack } : {}),
-      });
+      const outline = await request<{ version: number; status: "draft" | "confirmed" }>(
+        `/projects/${projectId}/outline/generate`,
+        { method: "POST", body: JSON.stringify(sourcePack ? { sourcePack } : {}) },
+      );
       push("Outline", `Generated OutlineDecision v${outline.version}`);
 
       const confirmedOutline =
@@ -153,49 +142,34 @@ export default function WorkflowClient() {
             });
       push("Outline", `Confirmed outline v${confirmedOutline.version}`);
 
-      const visual = await request<{ version: number; visualDirection: unknown }>(
-        `/projects/${projectId}/visual-directions/generate`,
-        {
-          method: "POST",
-          body: JSON.stringify({ outlineDecisionVersion: confirmedOutline.version }),
-        },
-      );
+      const visual = await request<{ version: number }>(`/projects/${projectId}/visual-directions/generate`, {
+        method: "POST",
+        body: JSON.stringify({ outlineDecisionVersion: confirmedOutline.version }),
+      });
       push("Visual", "Generated Apple, McKinsey, and Airbnb directions");
 
-      const selected = await request<{ version: number }>(
-        `/projects/${projectId}/visual-directions/select`,
-        {
-          method: "POST",
-          body: JSON.stringify({ visualDirectionVersion: visual.version, directionId: direction }),
-        },
-      );
+      const selected = await request<{ version: number }>(`/projects/${projectId}/visual-directions/select`, {
+        method: "POST",
+        body: JSON.stringify({ visualDirectionVersion: visual.version, directionId: direction }),
+      });
       push("Visual", `Selected ${direction} direction v${selected.version}`);
 
       const deck = await request<{ version: number; slideDeck: { slides: unknown[] } }>(
         `/projects/${projectId}/slide-deck/assemble`,
-        {
-          method: "POST",
-          body: JSON.stringify({ visualDirectionVersion: selected.version }),
-        },
+        { method: "POST", body: JSON.stringify({ visualDirectionVersion: selected.version }) },
       );
       push("SlideDeck", `Assembled ${deck.slideDeck.slides.length} slides from one JSON contract`);
 
-      const rendered = await request<{ version: number; renderResult: RenderResult }>(
-        `/projects/${projectId}/render`,
-        {
-          method: "POST",
-          body: JSON.stringify({ slideDeckVersion: deck.version }),
-        },
-      );
+      const rendered = await request<{ version: number; renderResult: RenderResult }>(`/projects/${projectId}/render`, {
+        method: "POST",
+        body: JSON.stringify({ slideDeckVersion: deck.version }),
+      });
       push("Render", "Rendered editable PPTX and HyperFrames HTML");
 
-      const quality = await request<{ version: number; qualityReport: QualityReport }>(
-        `/projects/${projectId}/quality/check`,
-        {
-          method: "POST",
-          body: JSON.stringify({ renderVersion: rendered.version }),
-        },
-      );
+      const quality = await request<{ version: number; qualityReport: QualityReport }>(`/projects/${projectId}/quality/check`, {
+        method: "POST",
+        body: JSON.stringify({ renderVersion: rendered.version }),
+      });
       push("Quality", `Quality check ${quality.qualityReport.passed ? "passed" : "failed"} v${quality.version}`);
 
       const exports = await request<{ exports: ApiExport[] }>(`/projects/${projectId}/exports`);
@@ -223,23 +197,17 @@ export default function WorkflowClient() {
     <main className="workflow-page">
       <section className="workflow-shell">
         <div className="workflow-intro">
-          <a className="back-link" href="/">鈫?Back to landing</a>
-          <p className="eyebrow">Live local workflow / 鏈湴瀹屾暣娴佺▼</p>
+          <a className="back-link" href="/">? Back to landing</a>
+          <p className="eyebrow">Live local workflow / {"\u672c\u5730\u5b8c\u6574\u6d41\u7a0b"}</p>
           <h1>Generate a deck all the way to downloads.</h1>
           <p className="lead">
-            This page calls the local FastAPI backend and runs the entire checkpointed flow in one click:
-            brief, outline, visual direction, SlideDeck JSON, render, and export.
+            This page calls the local FastAPI backend and runs the entire checkpointed flow in one click: source notes,
+            credits quote, outline, visual direction, SlideDeck JSON, render, quality, and export.
           </p>
         </div>
 
         <div className="workflow-console">
-          <form
-            className="run-card"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void runWorkflow();
-            }}
-          >
+          <form className="run-card" onSubmit={(event) => { event.preventDefault(); void runWorkflow(); }}>
             <label>
               Topic
               <textarea value={topic} onChange={(event) => setTopic(event.target.value)} />
@@ -249,6 +217,10 @@ export default function WorkflowClient() {
               <textarea value={sourceText} onChange={(event) => setSourceText(event.target.value)} />
             </label>
             <label>
+              Import .txt/.md source
+              <input type="file" accept=".txt,.md,text/plain,text/markdown" onChange={(event) => void importTextFile(event.target.files?.[0])} />
+            </label>
+            <label>
               Audience
               <input value={audience} onChange={(event) => setAudience(event.target.value)} />
             </label>
@@ -256,34 +228,19 @@ export default function WorkflowClient() {
               <label>
                 Deck type
                 <select value={deckType} onChange={(event) => setDeckType(event.target.value as DeckType)}>
-                  {deckTypes.map((item) => (
-                    <option value={item} key={item}>
-                      {item}
-                    </option>
-                  ))}
+                  {deckTypes.map((item) => <option value={item} key={item}>{item}</option>)}
                 </select>
               </label>
               <label>
                 Output language
-                <select
-                  value={outputLanguage}
-                  onChange={(event) => setOutputLanguage(event.target.value as OutputLanguage)}
-                >
-                  {outputLanguages.map((item) => (
-                    <option value={item} key={item}>
-                      {item}
-                    </option>
-                  ))}
+                <select value={outputLanguage} onChange={(event) => setOutputLanguage(event.target.value as OutputLanguage)}>
+                  {outputLanguages.map((item) => <option value={item} key={item}>{item}</option>)}
                 </select>
               </label>
               <label>
                 Visual direction
                 <select value={direction} onChange={(event) => setDirection(event.target.value as VisualDirectionId)}>
-                  {directions.map((item) => (
-                    <option value={item} key={item}>
-                      {item}
-                    </option>
-                  ))}
+                  {directions.map((item) => <option value={item} key={item}>{item}</option>)}
                 </select>
               </label>
             </div>
@@ -298,17 +255,14 @@ export default function WorkflowClient() {
             {error ? <pre className="error-box">{error}</pre> : null}
             <ol className="run-log">
               {logs.map((item, index) => (
-                <li key={`${item.label}-${index}`}>
-                  <strong>{item.label}</strong>
-                  <span>{item.detail}</span>
-                </li>
+                <li key={`${item.label}-${index}`}><strong>{item.label}</strong><span>{item.detail}</span></li>
               ))}
             </ol>
             {canDownload ? (
               <div className="download-panel">
                 <h3>Exports ready</h3>
                 <p>
-                  Project {state.projectId} 路 outline v{state.outlineVersion} 路 visual v{state.visualVersion} 璺?                  deck v{state.slideDeckVersion} 路 render v{state.renderVersion} 路 quality v{state.qualityVersion}
+                  Project {state.projectId} ? estimated {state.quote?.totalCredits} credits ? outline v{state.outlineVersion} ? visual v{state.visualVersion} ? deck v{state.slideDeckVersion} ? render v{state.renderVersion} ? quality v{state.qualityVersion}
                 </p>
                 <div className="download-actions">
                   {state.exports.map((item) => (
@@ -318,13 +272,10 @@ export default function WorkflowClient() {
                   ))}
                 </div>
               </div>
-            ) : (
-              <p className="empty-state">Run the workflow to create local exports.</p>
-            )}
+            ) : <p className="empty-state">Run the workflow to create local exports.</p>}
           </section>
         </div>
       </section>
     </main>
   );
 }
-

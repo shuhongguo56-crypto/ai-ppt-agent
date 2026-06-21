@@ -12,3 +12,4 @@ __pycache__/
 /.task*-*/
 /test-tmp/
 *.tmp
+*.tsbuildinfo
