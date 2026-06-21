@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from ai_ppt_contracts import (
     OutlineDecision,
     ProjectBrief,
+    RenderResult,
     SlideDeck,
     SourceItem,
     SourcePack,
@@ -217,6 +218,32 @@ def valid_slide_deck(**overrides: object) -> dict[str, object]:
     return values
 
 
+def valid_render_result(**overrides: object) -> dict[str, object]:
+    values: dict[str, object] = {
+        "schemaVersion": "1.0.0",
+        "projectId": "project-1",
+        "slideDeckVersion": 1,
+        "artifacts": [
+            {
+                "schemaVersion": "1.0.0",
+                "target": "pptx",
+                "path": "D:/Codex/Outputs/deck.pptx",
+                "contentType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "slideCount": 3,
+            },
+            {
+                "schemaVersion": "1.0.0",
+                "target": "hyperframes_html",
+                "path": "D:/Codex/Outputs/deck.html",
+                "contentType": "text/html; charset=utf-8",
+                "slideCount": 3,
+            },
+        ],
+    }
+    values.update(overrides)
+    return values
+
+
 def load_schema_exporter() -> ModuleType:
     path = ROOT / "packages" / "contracts" / "scripts" / "export_schemas.py"
     spec = spec_from_file_location("contract_schema_exporter", path)
@@ -371,6 +398,23 @@ def test_slide_deck_rejects_split_or_unordered_export_targets() -> None:
         SlideDeck(**valid_slide_deck(exportTargets=["hyperframes_html", "pptx"]))
 
 
+def test_render_result_requires_both_outputs_from_same_deck() -> None:
+    result = RenderResult(**valid_render_result())
+
+    assert [artifact.target for artifact in result.artifacts] == [
+        "pptx",
+        "hyperframes_html",
+    ]
+    assert {artifact.slide_count for artifact in result.artifacts} == {3}
+
+
+def test_render_result_rejects_mismatched_slide_counts() -> None:
+    values = valid_render_result()
+    values["artifacts"][1]["slideCount"] = 4
+    with pytest.raises(ValidationError):
+        RenderResult(**values)
+
+
 @pytest.mark.parametrize("invalid", ["", "   ", "\t\n"])
 @pytest.mark.parametrize(
     ("model", "values", "field"),
@@ -415,6 +459,7 @@ def test_schema_export_is_deterministic_and_artifacts_are_current(tmp_path: Path
     expected_names = {
         "outline-decision-1.0.0.json",
         "project-brief-1.0.0.json",
+        "render-result-1.0.0.json",
         "slide-deck-1.0.0.json",
         "source-pack-1.0.0.json",
         "visual-direction-1.0.0.json",
@@ -539,6 +584,15 @@ def test_typescript_contracts_match_python_serialized_fields() -> None:
                 'exportTargets: ["pptx", "hyperframes_html"];',
             },
         ),
+        "RenderResult": (
+            RenderResult,
+            {
+                "schemaVersion: SchemaVersion;",
+                "projectId: string;",
+                "slideDeckVersion: number;",
+                "artifacts: RenderArtifact[];",
+            },
+        ),
     }
 
     for interface_name, (model, expected_lines) in expected_interfaces.items():
@@ -560,6 +614,7 @@ def test_typescript_contracts_match_python_serialized_fields() -> None:
         "WorkflowStatus": '"pending" | "draft" | "confirmed" | "failed" | "complete"',
         "DeckLanguage": 'InputLanguage | "bilingual"',
         "VisualDirectionId": '"apple" | "mckinsey" | "airbnb"',
+        "RenderTarget": '"pptx" | "hyperframes_html"',
     }
     for type_name, expected in expected_types.items():
         declaration = typescript.split(f"export type {type_name} =", 1)[1].split(";", 1)[0]

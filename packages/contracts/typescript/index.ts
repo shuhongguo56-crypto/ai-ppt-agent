@@ -45,6 +45,7 @@ export type SlideBlockType =
   | "chart_placeholder"
   | "image_placeholder"
   | "speaker_notes";
+export type RenderTarget = "pptx" | "hyperframes_html";
 
 export interface ProjectBrief {
   schemaVersion: SchemaVersion;
@@ -198,4 +199,19 @@ export interface SlideDeck {
   theme: SlideDeckTheme;
   slides: SlideDeckSlide[];
   exportTargets: ["pptx", "hyperframes_html"];
+}
+
+export interface RenderArtifact {
+  schemaVersion: SchemaVersion;
+  target: RenderTarget;
+  path: string;
+  contentType: string;
+  slideCount: number;
+}
+
+export interface RenderResult {
+  schemaVersion: SchemaVersion;
+  projectId: string;
+  slideDeckVersion: number;
+  artifacts: RenderArtifact[];
 }

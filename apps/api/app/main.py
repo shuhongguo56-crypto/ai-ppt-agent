@@ -9,6 +9,7 @@ from .errors import PublicError
 from .persistence.sqlite import SQLiteProjectRepository
 from .routes.outline import router as outline_router
 from .routes.projects import router as projects_router
+from .routes.render import router as render_router
 from .routes.slide_deck import router as slide_deck_router
 from .routes.skills import router as skills_router
 from .routes.visual import router as visual_router
@@ -39,6 +40,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(outline_router, prefix="/api")
     app.include_router(visual_router, prefix="/api")
     app.include_router(slide_deck_router, prefix="/api")
+    app.include_router(render_router, prefix="/api")
     app.include_router(skills_router, prefix="/api")
 
     @app.exception_handler(PublicError)
