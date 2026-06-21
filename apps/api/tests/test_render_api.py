@@ -53,7 +53,7 @@ def test_render_creates_pptx_and_hyperframes_from_same_slide_deck(client) -> Non
     payload = response.json()
     assert payload["stage"] == "render"
     assert payload["status"] == "complete"
-    assert payload["nextStep"] == "export"
+    assert payload["nextStep"] == "quality"
     result = payload["renderResult"]
     artifacts = result["artifacts"]
     assert [artifact["target"] for artifact in artifacts] == ["pptx", "hyperframes_html"]

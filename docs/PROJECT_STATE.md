@@ -6,7 +6,7 @@ Last updated: 2026-06-21
 
 We are building an international bilingual AI PPT generation website / SaaS.
 
-The product is not merely “make a PPT for the user.” It productizes the full AI PPT workflow:
+The product is not merely 閳ユ笗ake a PPT for the user.閳?It productizes the full AI PPT workflow:
 
 1. User enters a topic, text, or uploads source material.
 2. `HumanizePPT` analyzes the source and produces a structured outline decision.
@@ -115,6 +115,7 @@ Known completed commits:
 - `e6f3476 feat: assemble canonical slide deck`
 - `d1c57ca feat: render slide deck artifacts`
 - `f9348fd feat: build bilingual workflow landing page`
+- current work: export/download endpoints, quality gate, interactive workflow UI
 
 Implemented foundation areas:
 
@@ -131,26 +132,29 @@ Implemented foundation areas:
 - `VisualDirectionDecision` contract, schema, TypeScript interface, generation/select API.
 - `SlideDeck` contract, schema, TypeScript interface, and canonical assembly API.
 - `RenderResult` contract, schema, TypeScript interface, and local PPTX + HyperFrames HTML rendering API.
-- Bilingual Next.js workflow landing page.
+- Bilingual Next.js landing page.
+- Interactive Next.js `/workflow` page that runs the local API chain to downloads.
+- Export/download endpoints for PPTX and HyperFrames HTML.
+- Quality gate that validates render artifacts before export.
 
 ## Current verified status
 
 As of 2026-06-21, the local-foundation branch has passed:
 
-- `python -m pytest -q -W error` — 236 passed.
-- `pnpm test` — Python tests plus web/contracts TypeScript typecheck passed when bundled Python/Node/pnpm are placed on PATH.
+- `python -m pytest -q -W error` 閳?236 passed.
+- `pnpm test` 閳?Python tests plus web/contracts TypeScript typecheck passed when bundled Python/Node/pnpm are placed on PATH.
 
 ## Next development target
 
 Continue toward the actual product workflow:
 
-1. Add download/export endpoints for generated artifacts.
-2. Build an interactive frontend workflow that calls the backend APIs instead of only showing the landing page.
-3. Improve PPTX rendering fidelity and HyperFrames transitions.
-4. Add production model provider adapters behind the existing safe gateway interface.
+1. Improve PPTX rendering fidelity and HyperFrames transitions.
+2. Add production model provider adapters behind the existing safe gateway interface.
+3. Add real auth/billing/credits and persistent production storage.
+4. Add upload/source parsing and citation-backed research.
 
 ## Reconnection summary for future sessions
 
 If context is lost, remember this sentence:
 
-“We are building an international bilingual AI PPT SaaS that converts user input into a reviewed outline, three premium visual directions, one canonical SlideDeck JSON, and then both editable PPTX and HyperFrames HTML.”
+閳ユ凡e are building an international bilingual AI PPT SaaS that converts user input into a reviewed outline, three premium visual directions, one canonical SlideDeck JSON, and then both editable PPTX and HyperFrames HTML.閳?

@@ -71,6 +71,27 @@ def test_create_app_injects_independent_fake_gateways(tmp_path) -> None:
     assert first.state.image_gateway is not second.state.image_gateway
 
 
+def test_cors_allows_configured_local_frontend_origin(tmp_path) -> None:
+    app = create_app(
+        Settings(
+            database_path=tmp_path / "cors.db",
+            asset_path=tmp_path / "assets",
+            allowed_origins=["http://localhost:3000"],
+        )
+    )
+    with TestClient(app) as client:
+        response = client.options(
+            "/health",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
 def test_public_error_handler_returns_only_stable_public_fields(tmp_path) -> None:
     app: FastAPI = create_app(
         Settings(

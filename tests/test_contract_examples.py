@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from ai_ppt_contracts import (
     OutlineDecision,
     ProjectBrief,
+    QualityReport,
     RenderResult,
     SlideDeck,
     SourceItem,
@@ -398,6 +399,25 @@ def test_slide_deck_rejects_split_or_unordered_export_targets() -> None:
         SlideDeck(**valid_slide_deck(exportTargets=["hyperframes_html", "pptx"]))
 
 
+def valid_quality_report(**overrides: object) -> dict[str, object]:
+    values: dict[str, object] = {
+        "schemaVersion": "1.0.0",
+        "projectId": "project-1",
+        "renderVersion": 1,
+        "passed": True,
+        "checks": [
+            {
+                "schemaVersion": "1.0.0",
+                "name": "pptx_exists",
+                "status": "passed",
+                "detail": "PPTX exists.",
+            }
+        ],
+    }
+    values.update(overrides)
+    return values
+
+
 def test_render_result_requires_both_outputs_from_same_deck() -> None:
     result = RenderResult(**valid_render_result())
 
@@ -454,11 +474,30 @@ def test_contract_identifiers_and_summary_reject_blank_values(
         model(**(values | {field: invalid}))
 
 
+def test_quality_report_aligns_passed_with_checks() -> None:
+    assert QualityReport(**valid_quality_report()).passed is True
+    with pytest.raises(ValidationError):
+        QualityReport(
+            **valid_quality_report(
+                passed=True,
+                checks=[
+                    {
+                        "schemaVersion": "1.0.0",
+                        "name": "html_frame_count",
+                        "status": "failed",
+                        "detail": "Mismatch.",
+                    }
+                ],
+            )
+        )
+
+
 def test_schema_export_is_deterministic_and_artifacts_are_current(tmp_path: Path) -> None:
     schema_dir = ROOT / "packages" / "contracts" / "schemas"
     expected_names = {
         "outline-decision-1.0.0.json",
         "project-brief-1.0.0.json",
+        "quality-report-1.0.0.json",
         "render-result-1.0.0.json",
         "slide-deck-1.0.0.json",
         "source-pack-1.0.0.json",
@@ -593,6 +632,16 @@ def test_typescript_contracts_match_python_serialized_fields() -> None:
                 "artifacts: RenderArtifact[];",
             },
         ),
+        "QualityReport": (
+            QualityReport,
+            {
+                "schemaVersion: SchemaVersion;",
+                "projectId: string;",
+                "renderVersion: number;",
+                "passed: boolean;",
+                "checks: QualityCheckItem[];",
+            },
+        ),
     }
 
     for interface_name, (model, expected_lines) in expected_interfaces.items():
@@ -615,6 +664,7 @@ def test_typescript_contracts_match_python_serialized_fields() -> None:
         "DeckLanguage": 'InputLanguage | "bilingual"',
         "VisualDirectionId": '"apple" | "mckinsey" | "airbnb"',
         "RenderTarget": '"pptx" | "hyperframes_html"',
+        "QualityStatus": '"passed" | "failed"',
     }
     for type_name, expected in expected_types.items():
         declaration = typescript.split(f"export type {type_name} =", 1)[1].split(";", 1)[0]

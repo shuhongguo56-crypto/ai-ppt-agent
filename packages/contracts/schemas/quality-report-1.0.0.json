@@ -1,0 +1,83 @@
+{
+  "$defs": {
+    "QualityCheckItem": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Detail",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Name",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "const": "1.0.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "name",
+        "status",
+        "detail"
+      ],
+      "title": "QualityCheckItem",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "checks": {
+      "items": {
+        "$ref": "#/$defs/QualityCheckItem"
+      },
+      "maxItems": 20,
+      "minItems": 1,
+      "title": "Checks",
+      "type": "array"
+    },
+    "passed": {
+      "title": "Passed",
+      "type": "boolean"
+    },
+    "projectId": {
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Projectid",
+      "type": "string"
+    },
+    "renderVersion": {
+      "minimum": 1,
+      "title": "Renderversion",
+      "type": "integer"
+    },
+    "schemaVersion": {
+      "const": "1.0.0",
+      "title": "Schemaversion",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "projectId",
+    "renderVersion",
+    "passed",
+    "checks"
+  ],
+  "title": "QualityReport",
+  "type": "object"
+}

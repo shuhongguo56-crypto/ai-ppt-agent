@@ -302,11 +302,178 @@ h3 {
   font-weight: 800;
 }
 
+.workflow-page {
+  min-height: 100vh;
+  padding: 28px 0 70px;
+}
+
+.workflow-shell {
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+}
+
+.workflow-intro {
+  max-width: 860px;
+  padding: 52px 0 34px;
+}
+
+.back-link {
+  display: inline-flex;
+  margin-bottom: 34px;
+  color: var(--muted);
+}
+
+.workflow-console {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.8fr) minmax(0, 1.2fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.run-card,
+.result-card {
+  border: 1px solid var(--line);
+  border-radius: 30px;
+  background: var(--panel);
+  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(20px);
+}
+
+.run-card {
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+}
+
+.run-card label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.run-card input,
+.run-card textarea,
+.run-card select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px 15px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.09);
+  font: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.run-card textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.run-card option {
+  color: #07111f;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+.run-button {
+  border: 0;
+  cursor: pointer;
+}
+
+.run-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.result-card {
+  min-height: 560px;
+  padding: 28px;
+}
+
+.result-card h2 {
+  margin-bottom: 22px;
+  font-size: clamp(30px, 4vw, 46px);
+}
+
+.run-log {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.run-log li {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.run-log strong {
+  color: var(--accent);
+}
+
+.run-log span,
+.empty-state,
+.download-panel p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.error-box {
+  white-space: pre-wrap;
+  padding: 16px;
+  border-radius: 18px;
+  color: #ffe8e8;
+  background: rgba(255, 90, 95, 0.16);
+  border: 1px solid rgba(255, 90, 95, 0.3);
+}
+
+.download-panel {
+  margin-top: 24px;
+  padding: 22px;
+  border-radius: 24px;
+  border: 1px solid rgba(138, 180, 248, 0.35);
+  background: rgba(138, 180, 248, 0.12);
+}
+
+.download-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
 @media (max-width: 980px) {
   .hero-grid,
   .split,
   .workflow,
-  .pricing {
+  .pricing,
+  .workflow-console {
+    grid-template-columns: 1fr;
+  }
+
+  .run-log li {
     grid-template-columns: 1fr;
   }
 
@@ -314,4 +481,3 @@ h3 {
     grid-template-columns: 1fr;
   }
 }
-

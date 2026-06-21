@@ -2,13 +2,16 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from .config import Settings, get_settings
 from .ai.fakes import FakeImageGateway, FakeTextGateway
 from .errors import PublicError
 from .persistence.sqlite import SQLiteProjectRepository
+from .routes.exports import router as exports_router
 from .routes.outline import router as outline_router
 from .routes.projects import router as projects_router
+from .routes.quality import router as quality_router
 from .routes.render import router as render_router
 from .routes.slide_deck import router as slide_deck_router
 from .routes.skills import router as skills_router
@@ -36,11 +39,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.repository = repository
     app.state.text_gateway = FakeTextGateway()
     app.state.image_gateway = FakeImageGateway()
+    if resolved.allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=resolved.allowed_origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "PATCH", "PUT", "OPTIONS"],
+            allow_headers=["*"],
+        )
     app.include_router(projects_router, prefix="/api")
     app.include_router(outline_router, prefix="/api")
     app.include_router(visual_router, prefix="/api")
     app.include_router(slide_deck_router, prefix="/api")
     app.include_router(render_router, prefix="/api")
+    app.include_router(quality_router, prefix="/api")
+    app.include_router(exports_router, prefix="/api")
     app.include_router(skills_router, prefix="/api")
 
     @app.exception_handler(PublicError)

@@ -45,7 +45,7 @@ export default function Home() {
               最终从同一份 SlideDeck JSON 同时导出可编辑 PPTX 与 HyperFrames HTML。
             </p>
             <div className="actions">
-              <a className="button primary" href="#workflow">View workflow</a>
+              <a className="button primary" href="/workflow">Run workflow</a>
               <a className="button secondary" href="#status">Local build status</a>
             </div>
           </div>

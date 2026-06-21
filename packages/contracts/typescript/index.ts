@@ -46,6 +46,7 @@ export type SlideBlockType =
   | "image_placeholder"
   | "speaker_notes";
 export type RenderTarget = "pptx" | "hyperframes_html";
+export type QualityStatus = "passed" | "failed";
 
 export interface ProjectBrief {
   schemaVersion: SchemaVersion;
@@ -214,4 +215,19 @@ export interface RenderResult {
   projectId: string;
   slideDeckVersion: number;
   artifacts: RenderArtifact[];
+}
+
+export interface QualityCheckItem {
+  schemaVersion: SchemaVersion;
+  name: string;
+  status: QualityStatus;
+  detail: string;
+}
+
+export interface QualityReport {
+  schemaVersion: SchemaVersion;
+  projectId: string;
+  renderVersion: number;
+  passed: boolean;
+  checks: QualityCheckItem[];
 }

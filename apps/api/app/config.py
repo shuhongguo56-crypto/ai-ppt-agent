@@ -13,6 +13,12 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     database_path: Path = Path(".local/ai-ppt.db")
     asset_path: Path = Path(".local/assets")
+    allowed_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ]
+    )
     model_backend: Literal["fake"] = "fake"
     model_retry_count: int = Field(default=1, ge=1, le=3)
 

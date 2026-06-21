@@ -1,5 +1,6 @@
 from .outline import OutlineDecision, OutlineGeneratedBy, OutlineSlide
 from .project import ProjectBrief, SourceItem, SourcePack
+from .quality import QualityCheckItem, QualityReport
 from .render import RenderArtifact, RenderResult
 from .slide_deck import SlideBlock, SlideDeck, SlideDeckSlide, SlideDeckTheme
 from .visual import VisualDirection, VisualDirectionDecision, VisualGeneratedBy
@@ -10,6 +11,8 @@ __all__ = [
     "OutlineGeneratedBy",
     "OutlineSlide",
     "ProjectBrief",
+    "QualityCheckItem",
+    "QualityReport",
     "RenderArtifact",
     "RenderResult",
     "SlideBlock",
