@@ -1,2 +1,2 @@
-:HL["/ai-ppt-agent/_next/static/chunks/1n-5_h39tkigs.css","style"]
-0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}},"staleTime":300,"buildId":"tLidTLKLTsnXaC_-10peM"}
+:HL["/ai-ppt-agent/_next/static/chunks/120oh_bk1p7m9.css","style"]
+0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}},"staleTime":300,"buildId":"NNp61SxGo7qww0SPdbnoQ"}

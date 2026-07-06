@@ -1,6 +1,6 @@
 1:"$Sreact.fragment"
-2:I[96744,["/ai-ppt-agent/_next/static/chunks/1b7_wgb0tfe3t.js","/ai-ppt-agent/_next/static/chunks/2g767lv7-j9dw.js"],"default"]
+2:I[96744,["/ai-ppt-agent/_next/static/chunks/1b7_wgb0tfe3t.js","/ai-ppt-agent/_next/static/chunks/0xt1q1-bx-iey.js"],"default"]
 3:I[35073,["/ai-ppt-agent/_next/static/chunks/1b7_wgb0tfe3t.js"],"OutletBoundary"]
 4:"$Sreact.suspense"
-0:{"rsc":["$","$1","c",{"children":[["$","$L2",null,{}],[["$","script","script-0",{"src":"/ai-ppt-agent/_next/static/chunks/2g767lv7-j9dw.js","async":true}]],["$","$L3",null,{"children":["$","$4",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"tLidTLKLTsnXaC_-10peM"}
+0:{"rsc":["$","$1","c",{"children":[["$","$L2",null,{}],[["$","script","script-0",{"src":"/ai-ppt-agent/_next/static/chunks/0xt1q1-bx-iey.js","async":true}]],["$","$L3",null,{"children":["$","$4",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"NNp61SxGo7qww0SPdbnoQ"}
 5:null
