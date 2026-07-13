@@ -9,6 +9,9 @@ __pycache__/
 *.egg-info/
 .venv/
 /.local/
+/apps/api/.local/
+/apps/web/out/
+/.pytest-runtime-tmp/
 /.task*-*/
 /test-tmp/
 *.tmp
