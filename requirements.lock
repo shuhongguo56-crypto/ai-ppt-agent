@@ -23,6 +23,7 @@ pydantic==2.13.4
 pydantic-settings==2.14.2
 pydantic_core==2.46.4
 Pygments==2.20.0
+pypdf==6.10.0
 pytest==8.4.2
 referencing==0.37.0
 rpds-py==2026.5.1

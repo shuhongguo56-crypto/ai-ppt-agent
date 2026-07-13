@@ -13,6 +13,7 @@ PROJECT = {
     "topic": "CRISPR",
     "audience": "Undergraduates",
     "mode": "professional",
+    "agentMode": "research",
 }
 
 
@@ -33,6 +34,28 @@ def test_create_read_duplicate_and_missing_project(client) -> None:
     missing = client.get("/api/projects/missing")
     assert missing.status_code == 404
     assert missing.json()["error"]["code"] == "project_not_found"
+
+
+def test_list_projects_includes_latest_checkpoint(client) -> None:
+    first = PROJECT | {"projectId": "project-list-1", "topic": "First"}
+    second = PROJECT | {"projectId": "project-list-2", "topic": "Second"}
+    assert client.post("/api/projects", json=first).status_code == 201
+    assert client.post("/api/projects", json=second).status_code == 201
+    generated = client.post("/api/projects/project-list-2/outline/generate", json={})
+    assert generated.status_code == 200
+
+    response = client.get("/api/projects")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["projectId"] for item in payload["projects"]] == [
+        "project-list-2",
+        "project-list-1",
+    ]
+    latest = payload["projects"][0]["latestCheckpoint"]
+    assert latest["stage"] == "outline"
+    assert latest["version"] == generated.json()["version"]
+    assert payload["projects"][1]["latestCheckpoint"] is None
 
 
 def test_checkpoint_write_latest_stale_and_missing(client) -> None:

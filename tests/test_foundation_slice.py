@@ -18,6 +18,7 @@ def test_offline_foundation_slice(client: TestClient) -> None:
         "topic": "Local-first presentation workflow",
         "audience": "Undergraduates",
         "mode": "professional",
+        "agentMode": "research",
     }
 
     health = client.get("/health")

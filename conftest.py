@@ -19,6 +19,8 @@ def client(tmp_path) -> Iterator[TestClient]:
     settings = Settings(
         database_path=tmp_path / "test.db",
         asset_path=tmp_path / "assets",
+        image_search_enabled=False,
+        topic_research_enabled=False,
     )
     with TestClient(create_app(settings)) as test_client:
         yield test_client

@@ -3,12 +3,19 @@ import struct
 import zlib
 
 import pytest
+import httpx
 from jsonschema import Draft202012Validator
 
+from app.ai.cascade import CascadeTextGateway, TextProviderCandidate
 from app.ai.fakes import FakeImageGateway, FakeTextGateway
 from app.ai.errors import ModelGatewayError
+from app.ai.image_http import PollinationsImageGateway
 from app.ai.models import ImageRequest, TextRequest
+from app.ai.ollama import OllamaTextGateway
+from app.ai.openai import OpenAITextGateway
 from app.ai.protocols import ImageGateway, TextGateway
+from app.config import Settings
+from app.main import _image_candidates
 
 
 def test_fake_text_gateway_is_deterministic_and_json_serializable() -> None:
@@ -155,12 +162,133 @@ def test_fake_image_gateway_builds_deterministic_rgb_png_at_exact_dimensions() -
     assert raw[0] == raw[1 + width * 3] == 0
 
 
+def test_fake_image_gateway_draws_prompt_aware_non_solid_visuals() -> None:
+    image = FakeImageGateway().generate(
+        ImageRequest(
+            "gpt-image-2",
+            "Image type: course_review_atmosphere. university classroom learning review atmosphere",
+            64,
+            36,
+        )
+    )
+
+    idat_length = struct.unpack(">I", image.bytes[33:37])[0]
+    raw = zlib.decompress(image.bytes[41 : 41 + idat_length])
+    pixels = set()
+    stride = 1 + image.width * 3
+    for row in range(image.height):
+        start = row * stride + 1
+        for column in range(image.width):
+            offset = start + column * 3
+            pixels.add(bytes(raw[offset : offset + 3]))
+
+    assert len(pixels) > 12
+
+
 def test_image_pixels_change_when_prompt_changes() -> None:
     gateway = FakeImageGateway()
     first = gateway.generate(ImageRequest("gpt-image-2", "first", 2, 2))
     second = gateway.generate(ImageRequest("gpt-image-2", "second", 2, 2))
 
     assert first.bytes != second.bytes
+
+
+def test_pollinations_image_gateway_downloads_free_flux_image(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def generated_image(*args: object, **kwargs: object) -> httpx.Response:
+        captured["url"] = args[0]
+        captured["params"] = kwargs["params"]
+        return httpx.Response(
+            200,
+            headers={"content-type": "image/jpeg"},
+            content=b"\xff\xd8\xff\xe0free-image",
+        )
+
+    monkeypatch.setattr("app.ai.image_http.httpx.get", generated_image)
+
+    image = PollinationsImageGateway(model="flux").generate(
+        ImageRequest("flux", "premium presentation visual", 1024, 576)
+    )
+
+    assert image.mime_type == "image/jpeg"
+    assert image.bytes.startswith(b"\xff\xd8\xff")
+    assert image.model == "pollinations:flux"
+    assert "image.pollinations.ai/prompt/" in str(captured["url"])
+    assert captured["params"] == {
+        "width": 1024,
+        "height": 576,
+        "model": "flux",
+        "enhance": "true",
+        "private": "true",
+        "nologo": "true",
+        "referrer": "ai-ppt-agent",
+    }
+
+
+def test_pollinations_image_gateway_keeps_url_prompt_short_for_batch_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def generated_image(*args: object, **kwargs: object) -> httpx.Response:
+        captured["url"] = args[0]
+        return httpx.Response(
+            200,
+            headers={"content-type": "image/jpeg"},
+            content=b"\xff\xd8\xff\xe0free-image",
+        )
+
+    monkeypatch.setattr("app.ai.image_http.httpx.get", generated_image)
+    long_prompt = "premium keynote slide visual " + ("layered cinematic depth " * 80)
+
+    PollinationsImageGateway(model="flux").generate(
+        ImageRequest("flux", long_prompt, 1024, 576)
+    )
+
+    encoded_prompt = str(captured["url"]).rsplit("/prompt/", 1)[1]
+
+    assert len(encoded_prompt) <= 700
+    assert encoded_prompt.startswith("premium%20keynote%20slide%20visual")
+
+
+def test_pollinations_image_gateway_retries_temporary_provider_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+
+    def generated_image(*args: object, **kwargs: object) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(429, content=b"busy")
+        return httpx.Response(
+            200,
+            headers={"content-type": "image/jpeg"},
+            content=b"\xff\xd8\xff\xe0free-image",
+        )
+
+    monkeypatch.setattr("app.ai.image_http.httpx.get", generated_image)
+
+    image = PollinationsImageGateway(model="flux").generate(
+        ImageRequest("flux", "premium presentation visual", 1024, 576, max_attempts=2)
+    )
+
+    assert attempts == 2
+    assert image.mime_type == "image/jpeg"
+
+
+def test_pollinations_candidate_keeps_free_image_retry_budget() -> None:
+    candidates = _image_candidates(
+        Settings(
+            model_backend="cascade",
+            model_retry_count=1,
+            pollinations_image_enabled=True,
+        )
+    )
+    pollinations = next(candidate for candidate in candidates if candidate.name == "pollinations-free")
+
+    assert pollinations.gateway._max_attempts == 2
 
 
 @pytest.mark.parametrize("model", ["nano-banana", "nano-banana-2", "gpt-image-1"])
@@ -213,6 +341,171 @@ def test_fake_text_output_independently_validates_against_schema() -> None:
     result = FakeTextGateway().generate(TextRequest("gpt-5.4-mini", "prompt", schema))
 
     Draft202012Validator(schema).validate(result.data)
+
+
+def test_ollama_text_gateway_returns_validated_structured_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_post(url: str, json: dict, timeout: float) -> httpx.Response:
+        assert url == "http://127.0.0.1:11434/api/generate"
+        assert json["model"] == "qwen2.5:7b"
+        assert json["stream"] is False
+        assert json["format"]["required"] == ["title"]
+        assert "private prompt" in json["prompt"]
+        assert timeout == 12
+        return httpx.Response(
+            200,
+            json={
+                "response": '{"title":"Deck"}',
+                "prompt_eval_count": 11,
+                "eval_count": 3,
+            },
+        )
+
+    monkeypatch.setattr("app.ai.ollama.httpx.post", fake_post)
+    gateway = OllamaTextGateway(model="qwen2.5:7b")
+    result = gateway.generate(
+        TextRequest(
+            "ignored-provider-model",
+            "private prompt",
+            {
+                "type": "object",
+                "required": ["title"],
+                "properties": {"title": {"const": "Deck"}},
+                "additionalProperties": False,
+            },
+            timeout_seconds=12,
+        )
+    )
+
+    assert result.data == {"title": "Deck"}
+    assert result.model == "qwen2.5:7b"
+    assert result.usage == {"inputTokens": 11, "outputTokens": 3}
+
+
+def test_openai_compatible_gateway_supports_json_object_without_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_post(url: str, headers: dict, json: dict, timeout: float) -> httpx.Response:
+        assert url == "http://127.0.0.1:1234/v1/chat/completions"
+        assert "Authorization" not in headers
+        assert json["response_format"] == {"type": "json_object"}
+        assert "JSON Schema" in json["messages"][0]["content"]
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": '{"title":"Deck"}'}}],
+                "usage": {"prompt_tokens": 9, "completion_tokens": 2},
+            },
+        )
+
+    monkeypatch.setattr("app.ai.openai.httpx.post", fake_post)
+    gateway = OpenAITextGateway(
+        api_key=None,
+        base_url="http://127.0.0.1:1234/v1",
+        response_format_mode="json_object",
+    )
+
+    result = gateway.generate(
+        TextRequest(
+            "local-model",
+            "private prompt",
+            {
+                "type": "object",
+                "required": ["title"],
+                "properties": {"title": {"const": "Deck"}},
+                "additionalProperties": False,
+            },
+        )
+    )
+
+    assert result.data == {"title": "Deck"}
+    assert result.model == "local-model"
+    assert result.usage == {"inputTokens": 9, "outputTokens": 2}
+
+
+def test_cascade_text_gateway_falls_back_to_next_provider() -> None:
+    class BrokenGateway:
+        def generate(self, _request: TextRequest):
+            raise ModelGatewayError("model_request_failed", "provider failed", True)
+
+    cascade = CascadeTextGateway(
+        [
+            TextProviderCandidate("broken", BrokenGateway(), model="bad-model"),
+            TextProviderCandidate("fallback", FakeTextGateway(), model="gpt-5.4-mini"),
+        ]
+    )
+
+    result = cascade.generate(
+        TextRequest(
+            "ignored",
+            "private prompt",
+            {"type": "object", "required": ["fakeId"], "properties": {"fakeId": {"type": "string"}}},
+        )
+    )
+
+    assert result.model.startswith("fallback:")
+    assert result.data["fakeId"]
+
+
+def test_ollama_text_gateway_rejects_invalid_structured_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_post(*_args: object, **_kwargs: object) -> httpx.Response:
+        return httpx.Response(200, json={"response": '{"title":"Wrong"}'})
+
+    monkeypatch.setattr("app.ai.ollama.httpx.post", fake_post)
+
+    with pytest.raises(ModelGatewayError) as captured:
+        OllamaTextGateway().generate(
+            TextRequest(
+                "model",
+                "secret prompt",
+                {
+                    "type": "object",
+                    "required": ["title"],
+                    "properties": {"title": {"const": "Deck"}},
+                    "additionalProperties": False,
+                },
+            )
+        )
+
+    assert captured.value.code == "model_output_invalid"
+    assert "secret" not in str(captured.value)
+
+
+def test_ollama_health_reports_missing_service(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_get(*_args: object, **_kwargs: object) -> httpx.Response:
+        raise httpx.ConnectError("offline")
+
+    monkeypatch.setattr("app.ai.ollama.httpx.get", fake_get)
+
+    health = OllamaTextGateway(model="qwen2.5:7b").health()
+
+    assert health.service_ready is False
+    assert health.model_ready is False
+    assert "Start Ollama" in health.message
+
+
+def test_ollama_health_reports_missing_and_ready_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def missing_model(*_args: object, **_kwargs: object) -> httpx.Response:
+        return httpx.Response(200, json={"models": [{"name": "llama3.2:3b"}]})
+
+    monkeypatch.setattr("app.ai.ollama.httpx.get", missing_model)
+    missing = OllamaTextGateway(model="qwen2.5:7b").health()
+    assert missing.service_ready is True
+    assert missing.model_ready is False
+    assert "ollama pull qwen2.5:7b" in missing.message
+
+    def ready_model(*_args: object, **_kwargs: object) -> httpx.Response:
+        return httpx.Response(200, json={"models": [{"name": "qwen2.5:7b"}]})
+
+    monkeypatch.setattr("app.ai.ollama.httpx.get", ready_model)
+    ready = OllamaTextGateway(model="qwen2.5:7b").health()
+    assert ready.service_ready is True
+    assert ready.model_ready is True
 
 
 def test_strict_text_schema_receives_no_fake_metadata() -> None:

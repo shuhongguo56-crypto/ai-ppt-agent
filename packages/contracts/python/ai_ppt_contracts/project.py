@@ -19,6 +19,7 @@ class ProjectBrief(ContractModel):
     topic: str = Field(min_length=1, max_length=500)
     audience: str = Field(min_length=1, max_length=500)
     mode: Literal["professional", "one_click"]
+    agent_mode: Literal["fast", "research", "enterprise"] = "research"
 
 
 class SourceItem(ContractModel):

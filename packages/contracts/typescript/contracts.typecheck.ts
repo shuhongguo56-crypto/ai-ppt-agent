@@ -9,6 +9,7 @@ const validBrief: ProjectBrief = {
   topic: "A topic",
   audience: "An audience",
   mode: "professional",
+  agentMode: "research",
 };
 
 const sourcePackWithDefaultSources: SourcePack = {
@@ -28,6 +29,7 @@ const missingVersion: ProjectBrief = {
   topic: "A topic",
   audience: "An audience",
   mode: "one_click",
+  agentMode: "fast",
 };
 
 void sourcePackWithDefaultSources;

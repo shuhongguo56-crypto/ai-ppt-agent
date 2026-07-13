@@ -7,10 +7,60 @@
           "enum": [
             "apple",
             "mckinsey",
-            "airbnb"
+            "airbnb",
+            "academic_clean",
+            "thesis_blue",
+            "research_journal",
+            "startup_pitch",
+            "investor_dark",
+            "classroom_friendly",
+            "data_story",
+            "editorial_magazine",
+            "glassmorphism",
+            "medical_science",
+            "cinematic_research",
+            "policy_brief",
+            "ink_classical",
+            "product_showcase",
+            "architectural_premium",
+            "finance_terminal",
+            "workshop_playbook"
           ],
           "title": "Directionid",
           "type": "string"
+        },
+        "hyperframesPlan": {
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 3,
+          "title": "Hyperframesplan",
+          "type": "array"
+        },
+        "imageStrategy": {
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 3,
+          "title": "Imagestrategy",
+          "type": "array"
+        },
+        "layeringPlan": {
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 3,
+          "title": "Layeringplan",
+          "type": "array"
         },
         "layoutPrinciples": {
           "items": {
@@ -28,6 +78,17 @@
           "pattern": "\\S",
           "title": "Mood",
           "type": "string"
+        },
+        "motionPlan": {
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 3,
+          "title": "Motionplan",
+          "type": "array"
         },
         "name": {
           "minLength": 1,
@@ -92,7 +153,11 @@
         "typography",
         "layoutPrinciples",
         "textureLayer",
-        "sampleSlideIntents"
+        "sampleSlideIntents",
+        "motionPlan",
+        "layeringPlan",
+        "imageStrategy",
+        "hyperframesPlan"
       ],
       "title": "VisualDirection",
       "type": "object"
@@ -159,8 +224,8 @@
       "items": {
         "$ref": "#/$defs/VisualDirection"
       },
-      "maxItems": 3,
-      "minItems": 3,
+      "maxItems": 8,
+      "minItems": 2,
       "title": "Directions",
       "type": "array"
     },
@@ -189,7 +254,24 @@
           "enum": [
             "apple",
             "mckinsey",
-            "airbnb"
+            "airbnb",
+            "academic_clean",
+            "thesis_blue",
+            "research_journal",
+            "startup_pitch",
+            "investor_dark",
+            "classroom_friendly",
+            "data_story",
+            "editorial_magazine",
+            "glassmorphism",
+            "medical_science",
+            "cinematic_research",
+            "policy_brief",
+            "ink_classical",
+            "product_showcase",
+            "architectural_premium",
+            "finance_terminal",
+            "workshop_playbook"
           ],
           "type": "string"
         },

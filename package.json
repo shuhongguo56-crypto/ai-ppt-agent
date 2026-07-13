@@ -10,7 +10,7 @@
     "test:web": "pnpm --filter @ai-ppt/web typecheck",
     "test": "pnpm test:python && pnpm test:web",
     "dev:api": "python -m uvicorn app.main:app --app-dir apps/api --reload",
-    "dev:web": "pnpm --filter @ai-ppt/web dev",
+    "dev:web": "pnpm --filter @ai-ppt/web dev --hostname 127.0.0.1 --port 3001",
     "build:web": "pnpm --filter @ai-ppt/web build"
   }
 }

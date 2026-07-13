@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -6,7 +6,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from ai_ppt_contracts import OutlineDecision, ProjectBrief, SourcePack
 from app.domain.repositories import ProjectNotFound, VersionConflict
 from app.errors import PublicError
+from app.services.agent_modes import execution_policy, project_agent_mode
 from app.services.outline import generate_outline_decision
+from app.services.research import research_topic_sources
 
 
 router = APIRouter(prefix="/projects/{project_id}/outline", tags=["outline"])
@@ -74,27 +76,56 @@ def generate_outline(
     request: Request,
 ) -> dict[str, Any]:
     brief = _load_brief(project_id, request)
+    settings = request.app.state.settings
+    agent_mode = project_agent_mode(brief, settings.default_agent_mode)
+    policy = execution_policy(agent_mode)
     if body.source_pack is not None and body.source_pack.project_id != project_id:
         raise PublicError(
             "source_pack_project_mismatch",
             "Source pack does not belong to this project.",
             422,
         )
+    effective_source_pack = body.source_pack
+    if effective_source_pack is None:
+        enterprise_grade = bool(policy["enterpriseGrade"])
+        research_max_sources = int(policy["researchMaxSources"])
+        research_timeout_seconds = float(policy["researchTimeoutSeconds"])
+        research_result = research_topic_sources(
+            project_id=project_id,
+            topic=brief.topic,
+            audience=brief.audience,
+            language=brief.output_language,
+            enabled=settings.topic_research_enabled and bool(policy["researchEnabled"]),
+            timeout_seconds=(
+                max(settings.topic_research_timeout_seconds, research_timeout_seconds)
+                if enterprise_grade
+                else min(settings.topic_research_timeout_seconds, research_timeout_seconds)
+            ),
+            max_sources=(
+                min(8, max(settings.topic_research_max_sources, research_max_sources))
+                if enterprise_grade
+                else min(settings.topic_research_max_sources, research_max_sources)
+            ),
+            user_agent=settings.topic_research_user_agent,
+        )
+        effective_source_pack = research_result.source_pack
+    else:
+        research_result = None
     outline = generate_outline_decision(
         brief=brief,
-        source_pack=body.source_pack,
+        source_pack=effective_source_pack,
         text_gateway=request.app.state.text_gateway,
+        model_backend=request.app.state.settings.model_backend,
+        agent_mode=agent_mode,
+        prompt_quality_target=str(policy["promptQualityTarget"]),
     )
     latest = request.app.state.repository.latest_checkpoint_for_stage(project_id, "outline")
     expected_version = 0 if latest is None else latest.version
-    status: Literal["draft", "confirmed"] = (
-        "confirmed" if brief.mode == "one_click" else "draft"
-    )
     try:
         checkpoint = request.app.state.repository.put_checkpoint(
             project_id,
             "outline",
-            status,
+            "draft",
             outline.model_dump(by_alias=True, mode="json"),
             expected_version,
         )
@@ -107,7 +138,29 @@ def generate_outline(
             409,
         ) from None
     response = _checkpoint_response(checkpoint)
-    response["nextStep"] = "visual_direction" if status == "confirmed" else "outline_review"
+    response["sourcePack"] = (
+        effective_source_pack.model_dump(by_alias=True, mode="json")
+        if effective_source_pack is not None
+        else None
+    )
+    response["research"] = (
+        {
+            "mode": "supplied",
+            "providers": [],
+            "query": brief.topic,
+            "warnings": [],
+        }
+        if research_result is None
+        else {
+            "mode": research_result.mode,
+            "providers": research_result.providers,
+            "query": research_result.query,
+            "warnings": research_result.warnings,
+        }
+    )
+    response["agentMode"] = agent_mode
+    response["executionPolicy"] = policy
+    response["nextStep"] = "outline_review"
     return response
 
 
@@ -178,4 +231,3 @@ def confirm_outline(
     response = _checkpoint_response(checkpoint)
     response["nextStep"] = "visual_direction"
     return response
-

@@ -1,6 +1,7 @@
 from typing import Any, Literal
 
 from fastapi import APIRouter, Request
+from fastapi import Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ai_ppt_contracts import ProjectBrief
@@ -60,6 +61,25 @@ def create_project(brief: ProjectBrief, request: Request) -> dict[str, Any]:
     except ProjectAlreadyExists:
         raise PublicError("project_already_exists", "Project already exists.", 409) from None
     return {"projectId": brief.project_id, "brief": serialized}
+
+
+@router.get("")
+def list_projects(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict[str, Any]:
+    items = []
+    for project in request.app.state.repository.list(limit):
+        latest = request.app.state.repository.latest_checkpoint(project.project_id)
+        items.append(
+            {
+                "projectId": project.project_id,
+                "brief": project.brief,
+                "createdAt": project.created_at.isoformat(),
+                "latestCheckpoint": None if latest is None else _checkpoint_response(latest),
+            }
+        )
+    return {"projects": items}
 
 
 @router.get("/{project_id}")

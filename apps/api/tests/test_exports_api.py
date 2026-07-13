@@ -1,4 +1,7 @@
 from pathlib import Path
+import io
+import re
+import zipfile
 
 
 PROJECT = {
@@ -27,9 +30,10 @@ def render_project(client) -> dict:
         json={"outlineDecisionVersion": confirmed_outline.json()["version"]},
     )
     assert visual.status_code == 200
+    direction_id = visual.json()["visualDirection"]["directions"][0]["directionId"]
     selected = client.post(
         "/api/projects/project-export/visual-directions/select",
-        json={"visualDirectionVersion": visual.json()["version"], "directionId": "apple"},
+        json={"visualDirectionVersion": visual.json()["version"], "directionId": direction_id},
     )
     assert selected.status_code == 200
     deck = client.post(
@@ -60,15 +64,35 @@ def test_list_and_download_exports(client) -> None:
     assert [item["target"] for item in exports] == ["pptx", "hyperframes_html"]
     assert exports[0]["downloadUrl"] == "/api/projects/project-export/exports/pptx"
     assert exports[1]["downloadUrl"] == "/api/projects/project-export/exports/hyperframes_html"
+    assert exports[1]["contentType"] == "application/zip"
+    assert exports[0]["previewUrl"] is None
+    assert exports[1]["previewUrl"] == "/api/projects/project-export/exports/hyperframes_html?inline=true"
 
     pptx = client.get(exports[0]["downloadUrl"])
     html = client.get(exports[1]["downloadUrl"])
+    preview = client.get(exports[1]["previewUrl"])
 
     assert pptx.status_code == 200
     assert pptx.content.startswith(b"PK")
     assert "presentation" in pptx.headers["content-type"]
     assert html.status_code == 200
-    assert b"<!doctype html>" in html.content
+    assert html.content.startswith(b"PK")
+    assert "zip" in html.headers["content-type"]
+    with zipfile.ZipFile(io.BytesIO(html.content)) as archive:
+        names = set(archive.namelist())
+        assert "hyperframes.html" in names
+        assert any(name.startswith("assets/slide-") for name in names)
+        assert b"<!doctype html>" in archive.read("hyperframes.html")
+    assert preview.status_code == 200
+    assert "inline" in preview.headers["content-disposition"]
+    assert b"<!doctype html>" in preview.content
+    assert b"data-action=\"next\"" in preview.content
+    asset_match = re.search(r'<img src="assets/([^"]+)"', preview.content.decode("utf-8"))
+    assert asset_match is not None
+    asset = client.get(f"/api/projects/project-export/exports/assets/{asset_match.group(1)}")
+    assert asset.status_code == 200
+    assert asset.headers["content-type"].startswith("image/")
+    assert asset.content
     assert rendered["renderResult"]["projectId"] == "project-export"
 
 
@@ -94,9 +118,10 @@ def test_exports_require_quality_check(client) -> None:
         "/api/projects/project-export/visual-directions/generate",
         json={"outlineDecisionVersion": confirmed_outline.json()["version"]},
     )
+    direction_id = visual.json()["visualDirection"]["directions"][0]["directionId"]
     selected = client.post(
         "/api/projects/project-export/visual-directions/select",
-        json={"visualDirectionVersion": visual.json()["version"], "directionId": "apple"},
+        json={"visualDirectionVersion": visual.json()["version"], "directionId": direction_id},
     )
     deck = client.post(
         "/api/projects/project-export/slide-deck/assemble",
@@ -156,4 +181,3 @@ def test_export_download_rejects_paths_outside_asset_root(client, tmp_path) -> N
     assert response.status_code == 500
     assert response.json()["error"]["code"] == "export_artifact_invalid"
     assert "outside" not in response.text
-

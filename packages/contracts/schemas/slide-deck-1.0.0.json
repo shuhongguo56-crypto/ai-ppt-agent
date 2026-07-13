@@ -1,5 +1,86 @@
 {
   "$defs": {
+    "ImagePlanItem": {
+      "additionalProperties": false,
+      "properties": {
+        "imageType": {
+          "enum": [
+            "background",
+            "course_review_atmosphere",
+            "business_scene",
+            "classical_element",
+            "thesis_concept",
+            "product_showcase",
+            "icon_illustration",
+            "data_visual"
+          ],
+          "title": "Imagetype",
+          "type": "string"
+        },
+        "needsImage": {
+          "title": "Needsimage",
+          "type": "boolean"
+        },
+        "prompt": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Prompt",
+          "type": "string"
+        },
+        "providerChain": {
+          "items": {
+            "enum": [
+              "open_web_search",
+              "OpenAI Image API",
+              "Pollinations FLUX API",
+              "Midjourney API",
+              "Stable Diffusion API",
+              "custom image2 API",
+              "local_png_fallback"
+            ],
+            "type": "string"
+          },
+          "maxItems": 7,
+          "minItems": 1,
+          "title": "Providerchain",
+          "type": "array"
+        },
+        "purpose": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Purpose",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "const": "1.0.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "searchQuery": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Searchquery",
+          "type": "string"
+        },
+        "slide": {
+          "minimum": 1,
+          "title": "Slide",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "slide",
+        "needsImage",
+        "imageType",
+        "prompt",
+        "purpose",
+        "searchQuery",
+        "providerChain"
+      ],
+      "title": "ImagePlanItem",
+      "type": "object"
+    },
     "SlideBlock": {
       "additionalProperties": false,
       "properties": {
@@ -61,6 +142,9 @@
           "minItems": 2,
           "title": "Blocks",
           "type": "array"
+        },
+        "designPlan": {
+          "$ref": "#/$defs/SlideDesignPlan"
         },
         "layout": {
           "minLength": 1,
@@ -137,6 +221,7 @@
         "purpose",
         "layout",
         "visualIntent",
+        "designPlan",
         "blocks",
         "speakerNotes"
       ],
@@ -146,11 +231,40 @@
     "SlideDeckTheme": {
       "additionalProperties": false,
       "properties": {
+        "designSeed": {
+          "maximum": 2147483647,
+          "minimum": 0,
+          "title": "Designseed",
+          "type": "integer"
+        },
+        "designSystemId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Designsystemid",
+          "type": "string"
+        },
         "directionId": {
           "enum": [
             "apple",
             "mckinsey",
-            "airbnb"
+            "airbnb",
+            "academic_clean",
+            "thesis_blue",
+            "research_journal",
+            "startup_pitch",
+            "investor_dark",
+            "classroom_friendly",
+            "data_story",
+            "editorial_magazine",
+            "glassmorphism",
+            "medical_science",
+            "cinematic_research",
+            "policy_brief",
+            "ink_classical",
+            "product_showcase",
+            "architectural_premium",
+            "finance_terminal",
+            "workshop_playbook"
           ],
           "title": "Directionid",
           "type": "string"
@@ -208,9 +322,178 @@
         "palette",
         "typography",
         "textureLayer",
-        "layoutPrinciples"
+        "layoutPrinciples",
+        "designSystemId",
+        "designSeed"
       ],
       "title": "SlideDeckTheme",
+      "type": "object"
+    },
+    "SlideDesignPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "assetQuery": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Assetquery",
+          "type": "string"
+        },
+        "assetRole": {
+          "enum": [
+            "hero",
+            "context",
+            "evidence",
+            "diagram",
+            "metaphor",
+            "portrait"
+          ],
+          "title": "Assetrole",
+          "type": "string"
+        },
+        "compositionArchetype": {
+          "enum": [
+            "cinematic_hero",
+            "editorial_cover",
+            "architectural_cover",
+            "chapter_index",
+            "editorial_split",
+            "diagonal_story",
+            "statement_focus",
+            "proof_mosaic",
+            "data_landscape",
+            "process_ribbon",
+            "system_map",
+            "split_comparison",
+            "priority_stack",
+            "closing_echo",
+            "manifesto_close",
+            "future_horizon"
+          ],
+          "title": "Compositionarchetype",
+          "type": "string"
+        },
+        "compositionVariant": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Compositionvariant",
+          "type": "string"
+        },
+        "contentDensity": {
+          "enum": [
+            "sparse",
+            "balanced",
+            "dense"
+          ],
+          "title": "Contentdensity",
+          "type": "string"
+        },
+        "diagramLabels": {
+          "items": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "maxItems": 4,
+          "minItems": 2,
+          "title": "Diagramlabels",
+          "type": "array"
+        },
+        "explanationMode": {
+          "enum": [
+            "hero_photo",
+            "concept_diagram",
+            "process_diagram",
+            "data_evidence",
+            "comparison_visual",
+            "annotated_image",
+            "summary_map"
+          ],
+          "title": "Explanationmode",
+          "type": "string"
+        },
+        "hierarchy": {
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 3,
+          "title": "Hierarchy",
+          "type": "array"
+        },
+        "imageTreatment": {
+          "enum": [
+            "full_bleed",
+            "split_crop",
+            "masked_window",
+            "layered_cutout",
+            "evidence_strip",
+            "atmospheric_backdrop"
+          ],
+          "title": "Imagetreatment",
+          "type": "string"
+        },
+        "motionPreset": {
+          "enum": [
+            "cinematic_reveal",
+            "editorial_wipe",
+            "depth_parallax",
+            "evidence_reveal",
+            "sequence_build",
+            "diagram_orbit",
+            "closing_resolve"
+          ],
+          "title": "Motionpreset",
+          "type": "string"
+        },
+        "rationale": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Rationale",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "const": "1.0.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "visualBrief": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Visualbrief",
+          "type": "string"
+        },
+        "visualLayers": {
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 3,
+          "title": "Visuallayers",
+          "type": "array"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "compositionArchetype",
+        "compositionVariant",
+        "imageTreatment",
+        "assetRole",
+        "assetQuery",
+        "contentDensity",
+        "hierarchy",
+        "visualLayers",
+        "explanationMode",
+        "visualBrief",
+        "diagramLabels",
+        "motionPreset",
+        "rationale"
+      ],
+      "title": "SlideDesignPlan",
       "type": "object"
     }
   },
@@ -227,6 +510,15 @@
       "maxItems": 2,
       "minItems": 2,
       "title": "Exporttargets",
+      "type": "array"
+    },
+    "imagePlan": {
+      "items": {
+        "$ref": "#/$defs/ImagePlanItem"
+      },
+      "maxItems": 30,
+      "minItems": 3,
+      "title": "Imageplan",
       "type": "array"
     },
     "language": {
@@ -287,6 +579,7 @@
     "title",
     "theme",
     "slides",
+    "imagePlan",
     "exportTargets"
   ],
   "title": "SlideDeck",

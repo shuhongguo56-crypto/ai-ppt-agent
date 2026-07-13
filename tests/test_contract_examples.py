@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from importlib.util import module_from_spec, spec_from_file_location
@@ -36,6 +36,7 @@ def valid_brief(**overrides: object) -> dict[str, object]:
         "topic": "How CRISPR works",
         "audience": "Undergraduate biology students",
         "mode": "professional",
+        "agentMode": "research",
     }
     values.update(overrides)
     return values
@@ -128,6 +129,10 @@ def valid_visual_direction(**overrides: object) -> dict[str, object]:
         "layoutPrinciples": ["clear hierarchy", "strong grid", "low clutter"],
         "textureLayer": "subtle glass cards",
         "sampleSlideIntents": ["cover", "evidence", "close"],
+        "motionPlan": ["Frontend-Slides reveal", "HyperFrames staggered cards", "reduced motion fallback"],
+        "layeringPlan": ["background atmosphere", "midground image", "foreground takeaway"],
+        "imageStrategy": ["search open web first", "keep attribution", "GPT Image 2 fallback"],
+        "hyperframesPlan": ["same SlideDeck JSON", "asset float animation", "keyboard navigation"],
         "riskNotes": [],
     }
     values: dict[str, object] = {
@@ -176,7 +181,30 @@ def valid_slide_deck(**overrides: object) -> dict[str, object]:
                 "content": "Body",
                 "role": "support",
             },
+            {
+                "schemaVersion": "1.0.0",
+                "blockId": "block-3",
+                "blockType": "image_placeholder",
+                "content": "Grounded visual",
+                "role": "visual evidence",
+            },
         ],
+        "designPlan": {
+            "schemaVersion": "1.0.0",
+            "compositionArchetype": "data_landscape",
+            "compositionVariant": "right-rail-2",
+            "imageTreatment": "evidence_strip",
+            "assetRole": "evidence",
+            "assetQuery": "CRISPR evidence chart laboratory",
+            "contentDensity": "balanced",
+            "hierarchy": ["claim", "evidence", "source"],
+            "visualLayers": ["atmosphere", "evidence image", "editable conclusion"],
+            "explanationMode": "data_evidence",
+            "visualBrief": "Evidence 鈥?Body 鈥?Grounded visual",
+            "diagramLabels": ["Evidence", "Body", "Grounded visual"],
+            "motionPreset": "evidence_reveal",
+            "rationale": "Evidence content needs a dominant proof surface and a concise conclusion rail.",
+        },
         "speakerNotes": "Notes",
     }
     values: dict[str, object] = {
@@ -194,6 +222,8 @@ def valid_slide_deck(**overrides: object) -> dict[str, object]:
             "typography": "clean sans",
             "textureLayer": "subtle glass",
             "layoutPrinciples": ["clear", "spacious", "focused"],
+            "designSystemId": "apple-project-1",
+            "designSeed": 101,
         },
         "slides": [
             slide
@@ -203,6 +233,17 @@ def valid_slide_deck(**overrides: object) -> dict[str, object]:
                 "title": "Cover",
                 "purpose": "cover",
                 "layout": "hero",
+                "designPlan": slide["designPlan"]
+                | {
+                    "compositionArchetype": "cinematic_hero",
+                    "compositionVariant": "left-anchor-1",
+                    "imageTreatment": "full_bleed",
+                    "assetRole": "hero",
+                    "explanationMode": "hero_photo",
+                    "visualBrief": "Cover 鈥?Body",
+                    "diagramLabels": ["Cover", "Body"],
+                    "motionPreset": "cinematic_reveal",
+                },
             },
             slide | {"slideId": "slide-2", "slideIndex": 2, "title": "Evidence"},
             slide
@@ -212,6 +253,73 @@ def valid_slide_deck(**overrides: object) -> dict[str, object]:
                 "title": "Close",
                 "purpose": "conclusion",
                 "layout": "closing",
+                "designPlan": slide["designPlan"]
+                | {
+                    "compositionArchetype": "closing_echo",
+                    "compositionVariant": "centered-3",
+                    "imageTreatment": "atmospheric_backdrop",
+                    "assetRole": "metaphor",
+                    "explanationMode": "summary_map",
+                    "visualBrief": "Close 鈥?Body",
+                    "diagramLabels": ["Close", "Body"],
+                    "motionPreset": "closing_resolve",
+                },
+            },
+        ],
+        "imagePlan": [
+            {
+                "schemaVersion": "1.0.0",
+                "slide": 1,
+                "needsImage": True,
+                "imageType": "background",
+                "prompt": "premium academic cover background for CRISPR, clean laboratory atmosphere, strong negative space, no text",
+                "purpose": "Serves the cover claim by setting a precise scientific context before the title appears.",
+                "searchQuery": "CRISPR clean laboratory academic cover background",
+                "providerChain": [
+                    "open_web_search",
+                    "OpenAI Image API",
+                    "Pollinations FLUX API",
+                    "Midjourney API",
+                    "Stable Diffusion API",
+                    "custom image2 API",
+                    "local_png_fallback",
+                ],
+            },
+            {
+                "schemaVersion": "1.0.0",
+                "slide": 2,
+                "needsImage": True,
+                "imageType": "data_visual",
+                "prompt": "evidence visual for CRISPR mechanism, precise data landscape, laboratory proof surface, no text",
+                "purpose": "Serves the evidence slide by giving the proof surface a concrete visual anchor.",
+                "searchQuery": "CRISPR mechanism evidence data visual laboratory",
+                "providerChain": [
+                    "open_web_search",
+                    "OpenAI Image API",
+                    "Pollinations FLUX API",
+                    "Midjourney API",
+                    "Stable Diffusion API",
+                    "custom image2 API",
+                    "local_png_fallback",
+                ],
+            },
+            {
+                "schemaVersion": "1.0.0",
+                "slide": 3,
+                "needsImage": True,
+                "imageType": "thesis_concept",
+                "prompt": "conceptual synthesis image for CRISPR conclusion, clear academic metaphor, premium keynote style, no text",
+                "purpose": "Serves the closing slide by turning the final takeaway into a memorable concept image.",
+                "searchQuery": "CRISPR conclusion conceptual academic image",
+                "providerChain": [
+                    "open_web_search",
+                    "OpenAI Image API",
+                    "Pollinations FLUX API",
+                    "Midjourney API",
+                    "Stable Diffusion API",
+                    "custom image2 API",
+                    "local_png_fallback",
+                ],
             },
         ],
         "exportTargets": ["pptx", "hyperframes_html"],
@@ -276,6 +384,17 @@ def test_project_brief_accepts_supported_schema_and_serializes_camel_case() -> N
 
     assert brief.schema_version == "1.0.0"
     assert brief.model_dump(by_alias=True) == valid_brief()
+    assert ProjectBrief(**valid_brief(agentMode="enterprise")).agent_mode == "enterprise"
+
+
+def test_project_brief_defaults_to_research_agent_mode_for_legacy_projects() -> None:
+    values = valid_brief()
+    values.pop("agentMode")
+
+    brief = ProjectBrief(**values)
+
+    assert brief.agent_mode == "research"
+    assert brief.model_dump(by_alias=True)["agentMode"] == "research"
 
 
 def test_contract_rejects_unknown_schema_version() -> None:
@@ -384,21 +503,32 @@ def test_outline_decision_rejects_invalid_quality_gates(override: dict[str, obje
         OutlineDecision(**valid_outline(**override))
 
 
-def test_visual_direction_decision_accepts_exact_three_directions() -> None:
-    visual = VisualDirectionDecision(**valid_visual_direction(selectedDirectionId="apple"))
+def test_visual_direction_decision_accepts_exact_three_content_aware_directions() -> None:
+    base = valid_visual_direction()["directions"][0]
+    visual = VisualDirectionDecision(
+        **valid_visual_direction(
+            directions=[
+                base | {"directionId": "classroom_friendly", "name": "Classroom Friendly"},
+                base | {"directionId": "data_story", "name": "Data Story"},
+                base | {"directionId": "academic_clean", "name": "Academic Clean"},
+            ],
+            selectedDirectionId="data_story",
+        )
+    )
 
     assert visual.schema_version == "1.0.0"
     assert [direction.direction_id for direction in visual.directions] == [
-        "apple",
-        "mckinsey",
-        "airbnb",
+        "classroom_friendly",
+        "data_story",
+        "academic_clean",
     ]
-    assert visual.selected_direction_id == "apple"
+    assert visual.selected_direction_id == "data_story"
 
 
 def test_visual_direction_decision_rejects_missing_direction() -> None:
     values = valid_visual_direction()
     values["directions"] = values["directions"][:2]
+    values["selectedDirectionId"] = "academic_clean"
     with pytest.raises(ValidationError):
         VisualDirectionDecision(**values)
 
@@ -409,6 +539,23 @@ def test_slide_deck_accepts_canonical_export_targets() -> None:
     assert deck.schema_version == "1.0.0"
     assert deck.export_targets == ["pptx", "hyperframes_html"]
     assert deck.theme.direction_id == "apple"
+    assert deck.theme.design_system_id == "apple-project-1"
+    assert deck.theme.design_seed == 101
+    assert all(slide.design_plan.asset_query for slide in deck.slides)
+
+
+def test_slide_deck_rejects_repeated_or_imageless_page_plans() -> None:
+    values = valid_slide_deck()
+    values["slides"][1]["designPlan"] = values["slides"][0]["designPlan"]
+    with pytest.raises(ValidationError, match="adjacent"):
+        SlideDeck(**values)
+
+    values = valid_slide_deck()
+    values["slides"][1]["blocks"] = [
+        block for block in values["slides"][1]["blocks"] if block["blockType"] != "image_placeholder"
+    ]
+    with pytest.raises(ValidationError, match="image_placeholder"):
+        SlideDeck(**values)
 
 
 def test_slide_deck_rejects_split_or_unordered_export_targets() -> None:
@@ -581,6 +728,7 @@ def test_typescript_contracts_match_python_serialized_fields() -> None:
                 "topic: string;",
                 "audience: string;",
                 'mode: "professional" | "one_click";',
+                "agentMode: AgentMode;",
             },
         ),
         "OutlineDecision": (
@@ -654,6 +802,7 @@ def test_typescript_contracts_match_python_serialized_fields() -> None:
                 "title: string;",
                 "theme: SlideDeckTheme;",
                 "slides: SlideDeckSlide[];",
+                "imagePlan: ImagePlanItem[];",
                 'exportTargets: ["pptx", "hyperframes_html"];',
             },
         ),
@@ -693,11 +842,12 @@ def test_typescript_contracts_match_python_serialized_fields() -> None:
         "InputLanguage": '"zh" | "en"',
         "OutputLanguage": 'InputLanguage | "bilingual"',
         "DeckType": '"course_presentation" | "thesis_defense" | "research_report" | "business_pitch" | "case_competition"',
+        "AgentMode": '"fast" | "research" | "enterprise"',
         "SourceType": '"text" | "document" | "url" | "image"',
         "WorkflowStage": '"brief" | "outline" | "visual_direction" | "slide_deck" | "render" | "quality" | "export"',
         "WorkflowStatus": '"pending" | "draft" | "confirmed" | "failed" | "complete"',
         "DeckLanguage": 'InputLanguage | "bilingual"',
-        "VisualDirectionId": '"apple" | "mckinsey" | "airbnb"',
+        "VisualDirectionId": '"apple" | "mckinsey" | "airbnb" | "academic_clean" | "thesis_blue" | "research_journal" | "startup_pitch" | "investor_dark" | "classroom_friendly" | "data_story" | "editorial_magazine" | "glassmorphism" | "medical_science" | "cinematic_research" | "policy_brief" | "ink_classical" | "product_showcase" | "architectural_premium" | "finance_terminal" | "workshop_playbook"',
         "RenderTarget": '"pptx" | "hyperframes_html"',
         "QualityStatus": '"passed" | "failed"',
     }

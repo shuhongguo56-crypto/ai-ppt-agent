@@ -1,4 +1,9 @@
+import json
+import re
+import zipfile
 from pathlib import Path
+
+from app.services import quality as quality_service
 
 
 PROJECT = {
@@ -13,6 +18,20 @@ PROJECT = {
 }
 
 
+def test_quality_flags_outline_scaffold_in_customer_visible_copy() -> None:
+    issues = quality_service._internal_copy_issues(
+        "第四部分：迁移方法\n"
+        "行动优先级 2：先建立验收指标\n"
+        "可验证证据线索：财报和公开报道\n"
+        "Core message: internal planning trace"
+    )
+
+    assert "section scaffold prefix" in issues
+    assert "行动优先级" in issues
+    assert "可验证证据线索" in issues
+    assert "core message" in issues
+
+
 def render_project(client) -> dict:
     assert client.post("/api/projects", json=PROJECT).status_code == 201
     outline = client.post("/api/projects/project-quality/outline/generate", json={})
@@ -24,9 +43,10 @@ def render_project(client) -> dict:
         "/api/projects/project-quality/visual-directions/generate",
         json={"outlineDecisionVersion": confirmed_outline.json()["version"]},
     )
+    direction_id = visual.json()["visualDirection"]["directions"][0]["directionId"]
     selected = client.post(
         "/api/projects/project-quality/visual-directions/select",
-        json={"visualDirectionVersion": visual.json()["version"], "directionId": "apple"},
+        json={"visualDirectionVersion": visual.json()["version"], "directionId": direction_id},
     )
     deck = client.post(
         "/api/projects/project-quality/slide-deck/assemble",
@@ -53,13 +73,55 @@ def test_quality_check_passes_for_rendered_artifacts(client) -> None:
     assert payload["stage"] == "quality"
     assert payload["status"] == "complete"
     assert payload["nextStep"] == "export"
+    assert payload["closedLoop"]["status"] == "ready"
+    assert payload["closedLoop"]["blocksExport"] is False
+    assert payload["agentMode"] == "research"
+    assert payload["qualityProfile"] == "enterprise_ppt"
     report = payload["qualityReport"]
     assert report["passed"] is True
     assert {check["name"] for check in report["checks"]} >= {
         "pptx_exists",
         "hyperframes_html_exists",
         "pptx_slide_count",
+        "pptx_relationship_parts",
+        "pptx_native_powerpoint_scaffold",
+        "pptx_speaker_notes",
+        "pptx_design_markers",
+        "pptx_visual_assets",
+        "visual_asset_source_quality",
+        "pptx_reference_full_bleed_visuals",
+        "pptx_page_plan_markers",
+        "pptx_image_agent_plan_markers",
+        "pptx_explainer_layers",
+        "pptx_text_autofit",
+        "pptx_text_anchor_values",
+        "pptx_font_family_contract",
+        "pptx_foreground_bounds",
+        "pptx_text_fit_estimate",
+        "pptx_visible_copy_hygiene",
+        "pptx_text_encoding_integrity",
         "html_frame_count",
+        "html_visual_assets",
+        "hyperframes_renderer_marker",
+        "hyperframes_motion",
+        "html_reference_cinematic_style",
+        "html_page_plan_markers",
+        "html_image_agent_plan_markers",
+        "html_composition_diversity",
+        "html_explainer_layers",
+        "html_explanation_mode_diversity",
+        "html_visible_copy_hygiene",
+        "html_text_encoding_integrity",
+        "competition_story_arc",
+        "competition_copy_density",
+        "competition_visual_variety",
+        "competition_image_intent",
+        "research_storyline_contract",
+        "research_page_delivery_contract",
+        "research_visual_delivery_contract",
+        "customer_delivery_readiness",
+        "competition_ppt_baseline",
+        "enterprise_ppt_baseline",
     }
 
 
@@ -80,7 +142,9 @@ def test_quality_check_reports_failed_artifact_safely(client, tmp_path) -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "failed"
-    assert response.json()["nextStep"] == "manual_review"
+    assert response.json()["nextStep"] == "repair_and_rerender"
+    assert response.json()["closedLoop"]["status"] == "repair_required"
+    assert response.json()["closedLoop"]["blocksExport"] is True
 
 
 def test_quality_requires_render_and_fresh_version(client) -> None:
@@ -95,3 +159,134 @@ def test_quality_requires_render_and_fresh_version(client) -> None:
     )
     assert stale.status_code == 409
     assert stale.json()["error"]["code"] == "checkpoint_version_conflict"
+
+
+def test_quality_rejects_replacement_character_gibberish(client) -> None:
+    rendered = render_project(client)
+    html_artifact = next(
+        artifact
+        for artifact in rendered["renderResult"]["artifacts"]
+        if artifact["target"] == "hyperframes_html"
+    )
+    html_path = Path(html_artifact["path"])
+    html_path.write_text(
+        html_path.read_text(encoding="utf-8") + "<p>????????</p>",
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        "/api/projects/project-quality/quality/check",
+        json={"renderVersion": rendered["version"]},
+    )
+
+    assert response.status_code == 200
+    report = response.json()["qualityReport"]
+    assert report["passed"] is False
+    encoding_check = next(
+        check for check in report["checks"] if check["name"] == "html_text_encoding_integrity"
+    )
+    assert encoding_check["status"] == "failed"
+
+
+def test_visual_asset_source_quality_rejects_svg_or_local_fallback(tmp_path) -> None:
+    assets_dir = tmp_path / "assets"
+    assets_dir.mkdir()
+    (assets_dir / "slide-1-local.svg").write_text("<svg></svg>", encoding="utf-8")
+    (assets_dir / "slide-1-asset.json").write_text(
+        json.dumps(
+            {
+                "slide": 1,
+                "fileName": "slide-1-local.svg",
+                "mimeType": "image/svg+xml",
+                "sourceType": "safe_vector_fallback",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = quality_service._visual_asset_source_quality(tmp_path, 1)
+
+    assert result["passed"] is False
+    assert result["usable"] == 0
+    assert "source=safe_vector_fallback" in result["issues"][0]
+
+
+def test_quality_rejects_pptx_foreground_shapes_outside_safe_bounds(client) -> None:
+    rendered = render_project(client)
+    pptx_artifact = next(
+        artifact
+        for artifact in rendered["renderResult"]["artifacts"]
+        if artifact["target"] == "pptx"
+    )
+    pptx_path = Path(pptx_artifact["path"])
+    tmp_path = pptx_path.with_suffix(".bounds-broken.pptx")
+    with zipfile.ZipFile(pptx_path) as source, zipfile.ZipFile(
+        tmp_path, "w", compression=zipfile.ZIP_DEFLATED
+    ) as target:
+        for item in source.infolist():
+            data = source.read(item.filename)
+            if item.filename == "ppt/slides/slide1.xml":
+                xml = data.decode("utf-8")
+                xml = re.sub(
+                    r'(<p:cNvPr id="\d+" name="(?:Text|Card) \d+".*?<a:off x=")-?\d+(" y=")',
+                    r"\g<1>-250000\2",
+                    xml,
+                    count=1,
+                    flags=re.DOTALL,
+                )
+                data = xml.encode("utf-8")
+            target.writestr(item, data)
+    tmp_path.replace(pptx_path)
+
+    response = client.post(
+        "/api/projects/project-quality/quality/check",
+        json={"renderVersion": rendered["version"]},
+    )
+
+    assert response.status_code == 200
+    report = response.json()["qualityReport"]
+    assert report["passed"] is False
+    bounds_check = next(
+        check for check in report["checks"] if check["name"] == "pptx_foreground_bounds"
+    )
+    assert bounds_check["status"] == "failed"
+
+    repaired = client.post(
+        "/api/projects/project-quality/slide-deck/repair",
+        json={
+            "slideDeckVersion": rendered["renderResult"]["slideDeckVersion"],
+            "qualityReportVersion": response.json()["version"],
+            "repairPass": 1,
+        },
+    )
+
+    assert repaired.status_code == 200
+    repair_payload = repaired.json()
+    assert repair_payload["status"] == "confirmed"
+    assert repair_payload["version"] == rendered["renderResult"]["slideDeckVersion"] + 1
+    assert "safe_copy_and_density" in repair_payload["appliedRepairs"]
+    assert repair_payload["nextStep"] == "image_agent"
+    for slide in repair_payload["slideDeck"]["slides"]:
+        assert len(slide["title"]) <= 34
+        assert slide["designPlan"]["contentDensity"] == "balanced"
+
+
+def test_slide_deck_repair_requires_current_failed_quality_report(client) -> None:
+    rendered = render_project(client)
+    passed = client.post(
+        "/api/projects/project-quality/quality/check",
+        json={"renderVersion": rendered["version"]},
+    )
+    assert passed.status_code == 200
+
+    response = client.post(
+        "/api/projects/project-quality/slide-deck/repair",
+        json={
+            "slideDeckVersion": rendered["renderResult"]["slideDeckVersion"],
+            "qualityReportVersion": passed.json()["version"],
+            "repairPass": 1,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "quality_already_passed"

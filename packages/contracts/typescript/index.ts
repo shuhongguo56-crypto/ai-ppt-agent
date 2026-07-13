@@ -8,6 +8,7 @@ export type DeckType =
   | "research_report"
   | "business_pitch"
   | "case_competition";
+export type AgentMode = "fast" | "research" | "enterprise";
 export type SourceType = "text" | "document" | "url" | "image";
 export type WorkflowStage =
   | "brief"
@@ -37,7 +38,27 @@ export type SuggestedLayout =
   | "chart_focus"
   | "quote"
   | "closing";
-export type VisualDirectionId = "apple" | "mckinsey" | "airbnb";
+export type VisualDirectionId =
+  | "apple"
+  | "mckinsey"
+  | "airbnb"
+  | "academic_clean"
+  | "thesis_blue"
+  | "research_journal"
+  | "startup_pitch"
+  | "investor_dark"
+  | "classroom_friendly"
+  | "data_story"
+  | "editorial_magazine"
+  | "glassmorphism"
+  | "medical_science"
+  | "cinematic_research"
+  | "policy_brief"
+  | "ink_classical"
+  | "product_showcase"
+  | "architectural_premium"
+  | "finance_terminal"
+  | "workshop_playbook";
 export type SlideBlockType =
   | "headline"
   | "subtitle"
@@ -46,6 +67,65 @@ export type SlideBlockType =
   | "chart_placeholder"
   | "image_placeholder"
   | "speaker_notes";
+export type CompositionArchetype =
+  | "cinematic_hero"
+  | "editorial_cover"
+  | "architectural_cover"
+  | "chapter_index"
+  | "editorial_split"
+  | "diagonal_story"
+  | "statement_focus"
+  | "proof_mosaic"
+  | "data_landscape"
+  | "process_ribbon"
+  | "system_map"
+  | "split_comparison"
+  | "priority_stack"
+  | "closing_echo"
+  | "manifesto_close"
+  | "future_horizon";
+export type ImageTreatment =
+  | "full_bleed"
+  | "split_crop"
+  | "masked_window"
+  | "layered_cutout"
+  | "evidence_strip"
+  | "atmospheric_backdrop";
+export type AssetRole = "hero" | "context" | "evidence" | "diagram" | "metaphor" | "portrait";
+export type ContentDensity = "sparse" | "balanced" | "dense";
+export type ImageAssetType =
+  | "background"
+  | "course_review_atmosphere"
+  | "business_scene"
+  | "classical_element"
+  | "thesis_concept"
+  | "product_showcase"
+  | "icon_illustration"
+  | "data_visual";
+export type ImageProviderAdapter =
+  | "open_web_search"
+  | "OpenAI Image API"
+  | "Pollinations FLUX API"
+  | "Midjourney API"
+  | "Stable Diffusion API"
+  | "custom image2 API"
+  | "local_png_fallback";
+export type MotionPreset =
+  | "cinematic_reveal"
+  | "editorial_wipe"
+  | "depth_parallax"
+  | "evidence_reveal"
+  | "sequence_build"
+  | "diagram_orbit"
+  | "closing_resolve";
+export type ExplanationMode =
+  | "hero_photo"
+  | "concept_diagram"
+  | "process_diagram"
+  | "data_evidence"
+  | "comparison_visual"
+  | "annotated_image"
+  | "summary_map";
 export type RenderTarget = "pptx" | "hyperframes_html";
 export type QualityStatus = "passed" | "failed";
 
@@ -58,6 +138,7 @@ export interface ProjectBrief {
   topic: string;
   audience: string;
   mode: "professional" | "one_click";
+  agentMode: AgentMode;
 }
 
 export interface SourceItem {
@@ -148,6 +229,10 @@ export interface VisualDirection {
   layoutPrinciples: string[];
   textureLayer: string;
   sampleSlideIntents: string[];
+  motionPlan: string[];
+  layeringPlan: string[];
+  imageStrategy: string[];
+  hyperframesPlan: string[];
   riskNotes?: string[];
 }
 
@@ -168,6 +253,8 @@ export interface SlideDeckTheme {
   typography: string;
   textureLayer: string;
   layoutPrinciples: string[];
+  designSystemId: string;
+  designSeed: number;
 }
 
 export interface SlideBlock {
@@ -176,6 +263,34 @@ export interface SlideBlock {
   blockType: SlideBlockType;
   content: string;
   role: string;
+}
+
+export interface SlideDesignPlan {
+  schemaVersion: SchemaVersion;
+  compositionArchetype: CompositionArchetype;
+  compositionVariant: string;
+  imageTreatment: ImageTreatment;
+  assetRole: AssetRole;
+  assetQuery: string;
+  contentDensity: ContentDensity;
+  hierarchy: string[];
+  visualLayers: string[];
+  explanationMode: ExplanationMode;
+  visualBrief: string;
+  diagramLabels: string[];
+  motionPreset: MotionPreset;
+  rationale: string;
+}
+
+export interface ImagePlanItem {
+  schemaVersion: SchemaVersion;
+  slide: number;
+  needsImage: boolean;
+  imageType: ImageAssetType;
+  prompt: string;
+  purpose: string;
+  searchQuery: string;
+  providerChain: ImageProviderAdapter[];
 }
 
 export interface SlideDeckSlide {
@@ -187,6 +302,7 @@ export interface SlideDeckSlide {
   purpose: SlidePurpose;
   layout: string;
   visualIntent: string;
+  designPlan: SlideDesignPlan;
   blocks: SlideBlock[];
   speakerNotes: string;
 }
@@ -200,6 +316,7 @@ export interface SlideDeck {
   title: string;
   theme: SlideDeckTheme;
   slides: SlideDeckSlide[];
+  imagePlan: ImagePlanItem[];
   exportTargets: ["pptx", "hyperframes_html"];
 }
 

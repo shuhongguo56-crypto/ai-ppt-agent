@@ -3,10 +3,11 @@ from typing import Any
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from ai_ppt_contracts import OutlineDecision, VisualDirectionDecision
+from ai_ppt_contracts import OutlineDecision, ProjectBrief, VisualDirectionDecision
 from ai_ppt_contracts.visual import VisualDirectionId
 from app.domain.repositories import ProjectNotFound, VersionConflict
 from app.errors import PublicError
+from app.services.agent_modes import execution_policy, project_agent_mode
 from app.services.visual import (
     generate_visual_direction_decision,
     select_visual_direction,
@@ -43,9 +44,11 @@ def _checkpoint_response(checkpoint) -> dict[str, Any]:
     }
 
 
-def _ensure_project(project_id: str, request: Request) -> None:
-    if request.app.state.repository.get(project_id) is None:
+def _load_brief(project_id: str, request: Request) -> ProjectBrief:
+    project = request.app.state.repository.get(project_id)
+    if project is None:
         raise PublicError("project_not_found", "Project not found.", 404)
+    return ProjectBrief(**project.brief)
 
 
 @router.post("/generate")
@@ -54,7 +57,10 @@ def generate_visual_directions(
     body: VisualGenerateRequest,
     request: Request,
 ) -> dict[str, Any]:
-    _ensure_project(project_id, request)
+    brief = _load_brief(project_id, request)
+    settings = request.app.state.settings
+    agent_mode = project_agent_mode(brief, settings.default_agent_mode)
+    policy = execution_policy(agent_mode)
     outline_checkpoint = request.app.state.repository.latest_checkpoint_for_stage(
         project_id, "outline"
     )
@@ -77,6 +83,9 @@ def generate_visual_directions(
         outline=OutlineDecision(**outline_checkpoint.payload),
         outline_version=outline_checkpoint.version,
         text_gateway=request.app.state.text_gateway,
+        model_backend=request.app.state.settings.model_backend,
+        agent_mode=agent_mode,
+        prompt_quality_target=str(policy["promptQualityTarget"]),
     )
     latest = request.app.state.repository.latest_checkpoint_for_stage(
         project_id, "visual_direction"
@@ -99,6 +108,8 @@ def generate_visual_directions(
             409,
         ) from None
     response = _checkpoint_response(checkpoint)
+    response["agentMode"] = agent_mode
+    response["executionPolicy"] = policy
     response["nextStep"] = "visual_direction_selection"
     return response
 
@@ -109,7 +120,7 @@ def select_visual_direction_route(
     body: VisualSelectRequest,
     request: Request,
 ) -> dict[str, Any]:
-    _ensure_project(project_id, request)
+    _load_brief(project_id, request)
     latest = request.app.state.repository.latest_checkpoint_for_stage(
         project_id, "visual_direction"
     )
@@ -145,4 +156,3 @@ def select_visual_direction_route(
     response = _checkpoint_response(checkpoint)
     response["nextStep"] = "slide_deck"
     return response
-

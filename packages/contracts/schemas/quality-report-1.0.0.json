@@ -45,7 +45,7 @@
       "items": {
         "$ref": "#/$defs/QualityCheckItem"
       },
-      "maxItems": 20,
+      "maxItems": 48,
       "minItems": 1,
       "title": "Checks",
       "type": "array"

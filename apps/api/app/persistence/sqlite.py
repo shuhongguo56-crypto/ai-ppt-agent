@@ -164,6 +164,28 @@ class SQLiteProjectRepository:
             created_at=datetime.fromisoformat(row["created_at"]),
         )
 
+    def list(self, limit: int = 50) -> list[ProjectRecord]:
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1 or limit > 200:
+            raise ValueError("limit must be between 1 and 200")
+        with self._lock:
+            rows = self._connected().execute(
+                """
+                SELECT project_id, brief_json, created_at
+                FROM projects
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [
+            ProjectRecord(
+                project_id=row["project_id"],
+                brief=json.loads(row["brief_json"]),
+                created_at=datetime.fromisoformat(row["created_at"]),
+            )
+            for row in rows
+        ]
+
     def latest_checkpoint(self, project_id: str) -> CheckpointRecord | None:
         with self._lock:
             row = self._connected().execute(

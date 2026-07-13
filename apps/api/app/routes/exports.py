@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Any, Literal
+import zipfile
 
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse
@@ -36,16 +37,20 @@ def _artifact(payload: dict[str, Any], target: ExportTarget) -> dict[str, Any]:
 def _safe_path(root: Path, raw_path: str) -> Path:
     root_resolved = root.resolve()
     path = Path(raw_path)
-    if not path.is_absolute():
-        path = root_resolved / path
-    resolved = path.resolve()
-    try:
-        resolved.relative_to(root_resolved)
-    except ValueError:
-        raise PublicError("export_artifact_invalid", "Export artifact is unavailable.", 500) from None
-    if not resolved.is_file():
-        raise PublicError("export_artifact_missing", "Export artifact file is missing.", 404)
-    return resolved
+    candidates = [path] if path.is_absolute() else [path, root_resolved / path]
+    saw_outside_root = False
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        try:
+            resolved.relative_to(root_resolved)
+        except ValueError:
+            saw_outside_root = True
+            continue
+        if resolved.is_file():
+            return resolved
+    if saw_outside_root:
+        raise PublicError("export_artifact_invalid", "Export artifact is unavailable.", 500)
+    raise PublicError("export_artifact_missing", "Export artifact file is missing.", 404)
 
 
 @router.get("")
@@ -54,12 +59,22 @@ def list_exports(project_id: str, request: Request) -> dict[str, Any]:
     exports = []
     for artifact in checkpoint.payload["artifacts"]:
         target = artifact["target"]
+        content_type = (
+            "application/zip"
+            if target == "hyperframes_html"
+            else artifact["contentType"]
+        )
         exports.append(
             {
                 "target": target,
-                "contentType": artifact["contentType"],
+                "contentType": content_type,
                 "slideCount": artifact["slideCount"],
                 "downloadUrl": f"/api/projects/{project_id}/exports/{target}",
+                "previewUrl": (
+                    f"/api/projects/{project_id}/exports/{target}?inline=true"
+                    if target == "hyperframes_html"
+                    else None
+                ),
             }
         )
     return {
@@ -69,18 +84,78 @@ def list_exports(project_id: str, request: Request) -> dict[str, Any]:
     }
 
 
+@router.get("/assets/{file_name}")
+def download_hyperframes_asset(project_id: str, file_name: str, request: Request) -> FileResponse:
+    if "/" in file_name or "\\" in file_name or not file_name:
+        raise PublicError("export_asset_invalid", "Export asset is unavailable.", 400)
+    checkpoint = _latest_render(project_id, request)
+    artifact = _artifact(checkpoint.payload, "hyperframes_html")
+    html_path = _safe_path(request.app.state.settings.asset_path, artifact["path"])
+    root_resolved = request.app.state.settings.asset_path.resolve()
+    assets_dir = html_path.parent / "assets"
+    asset_path = assets_dir / file_name
+    try:
+        asset_path.resolve().relative_to(root_resolved)
+        asset_path.resolve().relative_to(assets_dir.resolve())
+    except ValueError:
+        raise PublicError("export_asset_invalid", "Export asset is unavailable.", 400) from None
+    if not asset_path.is_file():
+        raise PublicError("export_asset_missing", "Export asset file is missing.", 404)
+    suffix = asset_path.suffix.lower()
+    media_type = "image/jpeg" if suffix in {".jpg", ".jpeg"} else "image/svg+xml" if suffix == ".svg" else "image/png"
+    return FileResponse(asset_path, media_type=media_type)
+
+
 @router.get("/{target}")
 def download_export(
     project_id: str,
     target: ExportTarget,
     request: Request,
+    inline: bool = False,
 ) -> FileResponse:
     checkpoint = _latest_render(project_id, request)
     artifact = _artifact(checkpoint.payload, target)
     path = _safe_path(request.app.state.settings.asset_path, artifact["path"])
-    filename = "deck.pptx" if target == "pptx" else "hyperframes.html"
+    if inline and target == "hyperframes_html":
+        return FileResponse(
+            path,
+            media_type=artifact["contentType"],
+            headers={'Content-Disposition': 'inline; filename="hyperframes.html"'},
+        )
+    if target == "hyperframes_html":
+        package_path = _build_hyperframes_package(
+            root=request.app.state.settings.asset_path,
+            html_path=path,
+        )
+        return FileResponse(
+            package_path,
+            media_type="application/zip",
+            filename="hyperframes-package.zip",
+        )
     return FileResponse(
         path,
         media_type=artifact["contentType"],
-        filename=filename,
+        filename="deck.pptx",
     )
+
+
+def _build_hyperframes_package(*, root: Path, html_path: Path) -> Path:
+    root_resolved = root.resolve()
+    render_dir = html_path.parent
+    package_path = render_dir / "hyperframes-package.zip"
+    try:
+        package_path.resolve().relative_to(root_resolved)
+    except ValueError:
+        raise PublicError("export_artifact_invalid", "Export artifact is unavailable.", 500) from None
+    assets_dir = render_dir / "assets"
+    with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.write(html_path, "hyperframes.html")
+        if assets_dir.is_dir():
+            for asset_path in sorted(path for path in assets_dir.rglob("*") if path.is_file()):
+                resolved = asset_path.resolve()
+                try:
+                    resolved.relative_to(root_resolved)
+                except ValueError:
+                    continue
+                archive.write(resolved, str(Path("assets") / resolved.relative_to(assets_dir.resolve())))
+    return package_path
