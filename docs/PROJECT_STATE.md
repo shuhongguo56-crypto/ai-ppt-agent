@@ -532,3 +532,25 @@ Completed on 2026-07-14:
   - Real-image workflow artifact: `D:\Codex\Outputs\ai-ppt-real-images-20260714234337`.
   - The real workflow produced 8 slides, 8 distinct PPTX media assets, 1 Wikipedia/Wikimedia asset, 7 Pollinations FLUX assets, and passed all 44 checks including `visual_asset_uniqueness`, `customer_delivery_readiness`, and `enterprise_ppt_baseline`.
   - The public API was restarted on the current Cloudflare tunnel and returned HTTP 200 with research mode, open-web image search, and free image generation ready.
+
+## Apple-style customer workflow interaction pass
+
+Completed on 2026-07-15:
+
+- Installed and applied the `apple-design` skill to the customer-facing `/workflow` experience without changing the canonical SlideDeck generation contract.
+- Replaced duplicate page navigation with one floating workspace bar that continuously shows the current workflow stage and generation-service status.
+- Simplified the opening message to one customer outcome, one short explanation, and one progressive question at a time.
+- Removed decorative infinite aurora, sheen, slide-float, and orbit animations. Status pulses remain only where they communicate active work or connection state.
+- The PPT studio preview now supports direct pointer manipulation, pointer capture, live 1:1 tilt, momentum projection, and an interruptible return animation that starts from the current on-screen transform.
+- Added immediate press feedback, 44px minimum interactive targets, calmer material hierarchy, optical typography, and non-uppercase Chinese form labels.
+- Added explicit `prefers-reduced-motion`, `prefers-reduced-transparency`, and `prefers-contrast` behavior.
+- Added progressive auto-scroll to the next revealed chat question while respecting reduced-motion preferences.
+- Fixed a mobile min-content sizing bug discovered during screenshot QA: single-column grids now use `minmax(0, 1fr)`, so titles, fields, and button labels remain inside a 390px viewport. Only the stage rail intentionally scrolls horizontally.
+- Verification:
+  - Next.js typecheck passed.
+  - Next.js production/static export build passed.
+  - Desktop and 390x844 browser checks passed with no document overflow.
+  - Pointer-grab and release transforms changed continuously and returned to the resting transform after release.
+  - Progressive question reveal passed.
+  - Reduced-motion browser reported the materialization animation at effectively zero duration.
+  - Visual QA screenshots: `D:\Codex\Outputs\ai-ppt-apple-design-20260715\desktop.png` and `mobile-fixed.png`.

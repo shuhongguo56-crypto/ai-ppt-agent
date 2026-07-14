@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type {
   AgentMode,
   CreditQuote,
@@ -604,6 +604,9 @@ export default function WorkflowClient() {
   const [outlineDraft, setOutlineDraft] = useState<OutlineDecision | null>(null);
   const [sourceReports, setSourceReports] = useState<SourceReport[]>([]);
   const [activeVisualDirectionId, setActiveVisualDirectionId] = useState<VisualDirectionId | null>(null);
+  const chatCardRef = useRef<HTMLElement>(null);
+  const previewAnimationRef = useRef<Animation | null>(null);
+  const previewMotionRef = useRef({ x: 0, y: 0, velocityX: 0, velocityY: 0, time: 0 });
 
   const canDownload = state.exports.length > 0;
   const hasReviewableOutline = Boolean(state.projectId && state.outlineVersion && state.outlineDecision && !state.visualDecision && !canDownload);
@@ -628,6 +631,7 @@ export default function WorkflowClient() {
           : topic.trim() || isRunning
             ? "brief"
             : "brief";
+  const currentStageLabel = generationStages.find((stage) => stage.key === currentStage)?.label ?? "输入信息";
   const progressText = useMemo(() => {
     if (canDownload) return "你的 PPT 已经生成好了";
     if (qualityFailed) return "我拦住了未达标文件，正在等你一键返修";
@@ -642,6 +646,21 @@ export default function WorkflowClient() {
     setApiBaseInput(resolvedApiBase);
     void refreshRuntime(resolvedApiBase);
   }, []);
+
+  useEffect(() => {
+    if (conversationStep <= 1 || !chatCardRef.current) return;
+    const frame = window.requestAnimationFrame(() => {
+      const steps = chatCardRef.current?.querySelectorAll<HTMLElement>(".chat-step");
+      const nextStep = steps?.item((steps.length ?? 1) - 1);
+      nextStep?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        block: "nearest",
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [conversationStep]);
+
+  useEffect(() => () => previewAnimationRef.current?.cancel(), []);
 
   function push(label: string, detail: string) {
     setLogs((current) => [...current, { label, detail }]);
@@ -685,6 +704,81 @@ export default function WorkflowClient() {
 
   function revealNext(step: number) {
     setConversationStep((current) => Math.max(current, step));
+  }
+
+  function previewSlide(stage: HTMLDivElement) {
+    return stage.querySelector<HTMLElement>(".studio-slide");
+  }
+
+  function updatePreviewFromPointer(event: ReactPointerEvent<HTMLDivElement>) {
+    const slide = previewSlide(event.currentTarget);
+    if (!slide || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = Math.max(-1, Math.min(1, ((event.clientX - rect.left) / rect.width - 0.5) * 2));
+    const y = Math.max(-1, Math.min(1, ((event.clientY - rect.top) / rect.height - 0.5) * 2));
+    const now = performance.now();
+    const previous = previewMotionRef.current;
+    const elapsed = Math.max(8, now - previous.time);
+    previewMotionRef.current = {
+      x,
+      y,
+      velocityX: ((x - previous.x) / elapsed) * 1000,
+      velocityY: ((y - previous.y) / elapsed) * 1000,
+      time: now,
+    };
+    slide.style.transform =
+      `rotateX(${5 - y * 4}deg) rotateY(${-9 + x * 6}deg) rotateZ(${-1.2 + x * 0.7}deg) ` +
+      `translate3d(${x * 6}px, ${y * 4}px, 0) scale(1.012)`;
+  }
+
+  function handlePreviewPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.pointerType === "touch" || event.button !== 0) return;
+    const slide = previewSlide(event.currentTarget);
+    if (!slide) return;
+    if (previewAnimationRef.current) {
+      const liveTransform = window.getComputedStyle(slide).transform;
+      previewAnimationRef.current.cancel();
+      slide.style.transform = liveTransform;
+      previewAnimationRef.current = null;
+    }
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.currentTarget.classList.add("is-grabbed");
+    previewMotionRef.current = { x: 0, y: 0, velocityX: 0, velocityY: 0, time: performance.now() };
+    updatePreviewFromPointer(event);
+  }
+
+  function releasePreview(event: ReactPointerEvent<HTMLDivElement>) {
+    const stage = event.currentTarget;
+    const slide = previewSlide(stage);
+    if (!slide || !stage.hasPointerCapture(event.pointerId)) return;
+    stage.releasePointerCapture(event.pointerId);
+    stage.classList.remove("is-grabbed");
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      slide.style.removeProperty("transform");
+      return;
+    }
+    const current = window.getComputedStyle(slide).transform;
+    const motion = previewMotionRef.current;
+    const projectedX = Math.max(-1.4, Math.min(1.4, motion.x + motion.velocityX * 0.018));
+    const projectedY = Math.max(-1.4, Math.min(1.4, motion.y + motion.velocityY * 0.018));
+    const projected =
+      `rotateX(${5 - projectedY * 4}deg) rotateY(${-9 + projectedX * 6}deg) ` +
+      `rotateZ(${-1.2 + projectedX * 0.7}deg) translate3d(${projectedX * 6}px, ${projectedY * 4}px, 0) scale(1.006)`;
+    const rest = "rotateX(5deg) rotateY(-9deg) rotateZ(-1.2deg) translate3d(0, 0, 0) scale(1)";
+    slide.style.transform = current;
+    const animation = slide.animate(
+      [
+        { transform: current, offset: 0 },
+        { transform: projected, offset: 0.22 },
+        { transform: rest, offset: 1 },
+      ],
+      { duration: 420, easing: "cubic-bezier(0.22, 0.72, 0.18, 1)", fill: "forwards" },
+    );
+    previewAnimationRef.current = animation;
+    animation.onfinish = () => {
+      slide.style.removeProperty("transform");
+      previewAnimationRef.current = null;
+    };
   }
 
   function resetConversation() {
@@ -1260,16 +1354,28 @@ export default function WorkflowClient() {
   return (
     <main className="workflow-page">
       <section className="workflow-shell">
-        <div className="workflow-intro">
-          <div className="intro-links">
-            <a className="back-link" href="/">← 返回首页</a>
-            <a className="back-link" href="/projects">项目库</a>
+        <nav className="workspace-chrome" aria-label="AI PPT 工作台导航">
+          <a className="workspace-brand" href="/" aria-label="返回 AI PPT 首页">
+            <span aria-hidden="true">A</span>
+            <strong>AI PPT</strong>
+          </a>
+          <div className="workspace-context" aria-live="polite">
+            <small>当前步骤</small>
+            <span>{currentStageLabel}</span>
           </div>
-          <p className="eyebrow">AI PPT 对话生成</p>
-          <h1>像聊天一样回答几个问题，然后拿到你的 PPT。</h1>
+          <div className="workspace-actions">
+            <a href="/projects">项目库</a>
+            <span className={`connection-chip ${apiConnection}`}>
+              <i aria-hidden="true" />
+              {apiConnection === "connected" ? "生成服务在线" : apiConnection === "checking" ? "正在连接" : "服务离线"}
+            </span>
+          </div>
+        </nav>
+        <div className="workflow-intro">
+          <p className="eyebrow">AI PPT Studio</p>
+          <h1>把资料变成一份真正能交付的 PPT。</h1>
           <p className="lead">
-            我会一步一步问你主题、资料、受众、语言和场景。你只需要回答当前问题，
-            下一步才会出现。系统会先解析文件并生成 PPT 大纲；你确认大纲后，才会进入视觉方向和导出。
+            像聊天一样回答当前问题。系统会先理解资料并给出大纲，等你确认后，再完成视觉设计、逐页配图和双格式导出。
           </p>
           <div className="workflow-promise" aria-label="生成流程">
             {workflowPromise.map((item) => (
@@ -1277,7 +1383,16 @@ export default function WorkflowClient() {
             ))}
           </div>
           <div className="studio-showcase" aria-label="PPT 生成影棚预览">
-            <div className="studio-stage" aria-hidden="true">
+            <div
+              className="studio-stage"
+              aria-hidden="true"
+              onPointerDown={handlePreviewPointerDown}
+              onPointerMove={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) updatePreviewFromPointer(event);
+              }}
+              onPointerUp={releasePreview}
+              onPointerCancel={releasePreview}
+            >
               <div className="studio-slide">
                 <span>01</span>
                 <strong>{topic.trim() || "高级定制 PPT"}</strong>
@@ -1287,8 +1402,8 @@ export default function WorkflowClient() {
               <div className="studio-orbit studio-orbit-two" />
             </div>
             <div className="studio-copy">
-              <strong>客户只需要看到：大纲靠谱、画面高级、文件能放映。</strong>
-              <p>模型链路、图片来源、质量门禁都在后台完成；主界面只保留必要选择和最终交付。</p>
+              <strong>先把逻辑讲清楚，再把每一页做漂亮。</strong>
+              <p>资料理解、图片检索与交付检查在后台完成；你只需要做必要选择。</p>
             </div>
           </div>
           <details className={`runtime-banner api-health ${apiConnection}`}>
@@ -1407,7 +1522,7 @@ export default function WorkflowClient() {
         </div>
 
         <div className={`workflow-console${canDownload ? " delivery-ready" : ""}`}>
-          <section className={`run-card chat-card${canDownload ? " completed" : ""}`} aria-busy={isRunning} aria-label="PPT 对话式生成表单">
+          <section ref={chatCardRef} className={`run-card chat-card${canDownload ? " completed" : ""}`} aria-busy={isRunning} aria-label="PPT 对话式生成表单">
             {canDownload ? (
               <div className="completed-brief">
                 <span>本次任务</span>
