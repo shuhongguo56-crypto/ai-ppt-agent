@@ -760,7 +760,7 @@ def test_ai_visual_generation_uses_retry_budget_for_free_image_providers(tmp_pat
         image_prompt="premium brand presentation visual",
         provider_chain=["Pollinations FLUX API"],
         slide_title="品牌复兴",
-        slide_intent="用真实/生成图片解释增长策略",
+        slide_intent="用真实生成图片解释增长策略",
         asset_role="hero",
         image_treatment="masked_window",
         composition_archetype="editorial_cover",
@@ -770,6 +770,75 @@ def test_ai_visual_generation_uses_retry_budget_for_free_image_providers(tmp_pat
 
     assert asset is not None
     assert asset.source_type == "free_ai_fallback"
+
+
+def test_visual_asset_resolution_retries_until_replacement_is_unique(tmp_path) -> None:
+    generated_bytes = [
+        b"\xff\xd8\xff\xe0shared-image",
+        b"\xff\xd8\xff\xe0shared-image",
+        b"\xff\xd8\xff\xe0shared-image",
+        b"\xff\xd8\xff\xe0page-specific-image",
+    ]
+
+    class SequenceImageGateway:
+        def __init__(self) -> None:
+            self.requests = []
+
+        def generate(self, request):
+            self.requests.append(request)
+            content = generated_bytes[len(self.requests) - 1]
+            return GeneratedImage(
+                bytes=content,
+                mime_type="image/jpeg",
+                width=request.width,
+                height=request.height,
+                model="gpt-image-2",
+            )
+
+    def slide(slide_index: int):
+        return SimpleNamespace(
+            slide_index=slide_index,
+            title=f"Slide {slide_index}",
+            visual_intent=f"Explain page-specific idea {slide_index}",
+            design_plan=SimpleNamespace(
+                asset_role="hero",
+                image_treatment="masked_window",
+                composition_archetype="editorial_cover",
+            ),
+        )
+
+    def image_plan(slide_index: int):
+        return SimpleNamespace(
+            slide=slide_index,
+            search_query="shared search result",
+            image_type="business_scene",
+            purpose=f"Explain slide {slide_index}",
+            prompt=f"Page-specific visual {slide_index}",
+            provider_chain=["OpenAI Image API"],
+        )
+
+    deck = SimpleNamespace(
+        slides=[slide(1), slide(2)],
+        image_plan=[image_plan(1), image_plan(2)],
+        theme=SimpleNamespace(name="Enterprise Editorial", palette=["#111111", "#F2BF4A"]),
+    )
+    gateway = SequenceImageGateway()
+
+    assets = render_service.resolve_visual_assets(
+        deck,
+        tmp_path,
+        gateway,
+        mode="generate",
+        image_search_enabled=False,
+    )
+
+    assert len(gateway.requests) == 4
+    assert assets[1].path.read_bytes() == generated_bytes[0]
+    assert assets[2].path.read_bytes() == generated_bytes[3]
+    assert render_service._visual_asset_hash(assets[1].path) != render_service._visual_asset_hash(
+        assets[2].path
+    )
+    assert "Unique visual alternative 2 for slide 2" in gateway.requests[-1].prompt
 
 
 def test_render_requires_confirmed_slide_deck_and_fresh_version(client) -> None:

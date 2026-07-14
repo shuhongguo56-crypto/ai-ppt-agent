@@ -89,6 +89,7 @@ def test_quality_check_passes_for_rendered_artifacts(client) -> None:
         "pptx_design_markers",
         "pptx_visual_assets",
         "visual_asset_source_quality",
+        "visual_asset_uniqueness",
         "pptx_reference_full_bleed_visuals",
         "pptx_page_plan_markers",
         "pptx_image_agent_plan_markers",
@@ -209,6 +210,43 @@ def test_visual_asset_source_quality_rejects_svg_or_local_fallback(tmp_path) -> 
     assert result["passed"] is False
     assert result["usable"] == 0
     assert "source=safe_vector_fallback" in result["issues"][0]
+
+
+def test_visual_asset_uniqueness_rejects_reused_binary(tmp_path) -> None:
+    assets_dir = tmp_path / "assets"
+    assets_dir.mkdir()
+    repeated = b"\x89PNG\r\n\x1a\nshared-visual"
+    for slide_index in (1, 2):
+        file_name = f"slide-{slide_index}.png"
+        (assets_dir / file_name).write_bytes(repeated)
+        (assets_dir / f"slide-{slide_index}-asset.json").write_text(
+            json.dumps({"slide": slide_index, "fileName": file_name}),
+            encoding="utf-8",
+        )
+
+    result = quality_service._visual_asset_uniqueness(tmp_path, 2)
+
+    assert result["passed"] is False
+    assert result["unique"] == 1
+    assert "slides 1, 2 reuse the identical image" in result["issues"]
+
+
+def test_visual_asset_uniqueness_accepts_page_specific_binaries(tmp_path) -> None:
+    assets_dir = tmp_path / "assets"
+    assets_dir.mkdir()
+    for slide_index in (1, 2):
+        file_name = f"slide-{slide_index}.png"
+        (assets_dir / file_name).write_bytes(
+            b"\x89PNG\r\n\x1a\n" + str(slide_index).encode("ascii")
+        )
+        (assets_dir / f"slide-{slide_index}-asset.json").write_text(
+            json.dumps({"slide": slide_index, "fileName": file_name}),
+            encoding="utf-8",
+        )
+
+    result = quality_service._visual_asset_uniqueness(tmp_path, 2)
+
+    assert result == {"passed": True, "unique": 2, "issues": []}
 
 
 def test_quality_rejects_pptx_foreground_shapes_outside_safe_bounds(client) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import hashlib
 import json
 import re
 import zipfile
@@ -23,6 +24,7 @@ ENTERPRISE_PPT_BASELINE_CHECKS = {
     "pptx_speaker_notes",
     "pptx_visual_assets",
     "visual_asset_source_quality",
+    "visual_asset_uniqueness",
     "pptx_page_plan_markers",
     "pptx_image_agent_plan_markers",
     "pptx_explainer_layers",
@@ -113,6 +115,22 @@ def check_render_quality(
                     "PPTX relationship parts are present."
                     if not missing_relationships
                     else f"Missing relationship parts: {', '.join(missing_relationships[:5])}."
+                ),
+            }
+        )
+        asset_uniqueness = _visual_asset_uniqueness(pptx_path.parent, expected_slide_count)
+        checks.append(
+            {
+                "schemaVersion": "1.0.0",
+                "name": "visual_asset_uniqueness",
+                "status": "passed" if asset_uniqueness["passed"] else "failed",
+                "detail": (
+                    f"All {asset_uniqueness['unique']} rendered slide visuals are content-distinct assets."
+                    if asset_uniqueness["passed"]
+                    else (
+                        "Rendered slide visuals are reused or unreadable: "
+                        f"{', '.join(asset_uniqueness['issues'][:6])}."
+                    )
                 ),
             }
         )
@@ -473,6 +491,7 @@ def _customer_delivery_readiness_check(checks: list[dict[str, str]]) -> dict[str
         "pptx_native_powerpoint_scaffold",
         "pptx_visual_assets",
         "visual_asset_source_quality",
+        "visual_asset_uniqueness",
         "pptx_font_family_contract",
         "pptx_foreground_bounds",
         "pptx_text_fit_estimate",
@@ -1214,6 +1233,45 @@ def _visual_asset_source_quality(render_dir: Path, expected_slide_count: int) ->
             continue
         usable += 1
     return {"passed": usable >= expected_slide_count and not issues, "usable": usable, "issues": issues[:12]}
+
+
+def _visual_asset_uniqueness(render_dir: Path, expected_slide_count: int) -> dict[str, object]:
+    assets_dir = render_dir / "assets"
+    issues: list[str] = []
+    slides_by_hash: dict[str, list[int]] = {}
+    for slide_index in range(1, expected_slide_count + 1):
+        sidecar = assets_dir / f"slide-{slide_index}-asset.json"
+        try:
+            data = json.loads(sidecar.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            issues.append(f"slide {slide_index} missing or unreadable asset sidecar")
+            continue
+        file_name = str(data.get("fileName") or "")
+        if not file_name or Path(file_name).name != file_name:
+            issues.append(f"slide {slide_index} has an invalid image file name")
+            continue
+        asset_path = assets_dir / file_name
+        try:
+            content = asset_path.read_bytes()
+        except OSError:
+            issues.append(f"slide {slide_index} image file is unreadable")
+            continue
+        if not content:
+            issues.append(f"slide {slide_index} image file is empty")
+            continue
+        digest = hashlib.sha256(content).hexdigest()
+        slides_by_hash.setdefault(digest, []).append(slide_index)
+
+    for slide_indexes in slides_by_hash.values():
+        if len(slide_indexes) > 1:
+            joined = ", ".join(str(index) for index in slide_indexes)
+            issues.append(f"slides {joined} reuse the identical image")
+    unique = len(slides_by_hash)
+    return {
+        "passed": unique >= expected_slide_count and not issues,
+        "unique": unique,
+        "issues": issues[:12],
+    }
 
 
 def _pptx_text_fit_issues(path: Path) -> list[str]:

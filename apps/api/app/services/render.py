@@ -194,25 +194,38 @@ def resolve_visual_assets(
                 palette=deck.theme.palette,
             )
         if asset is not None and _visual_asset_hash(asset.path) in seen_image_hashes:
-            generated_asset = _generate_visual_asset_with_ai(
-                slide.slide_index,
-                query,
-                assets_dir,
-                image_gateway,
-                image_type=image_item.image_type,
-                purpose=image_item.purpose,
-                image_prompt=image_item.prompt,
-                provider_chain=list(image_item.provider_chain),
-                slide_title=slide.title,
-                slide_intent=slide.visual_intent,
-                asset_role=slide.design_plan.asset_role,
-                image_treatment=slide.design_plan.image_treatment,
-                composition_archetype=slide.design_plan.composition_archetype,
-                direction_name=deck.theme.name,
-                palette=deck.theme.palette,
-            )
-            if generated_asset is not None:
-                asset = generated_asset
+            # A searched or generated image can be returned for multiple pages by an
+            # upstream provider. Retry with an explicit page-specific variation, and
+            # only accept the replacement after verifying its actual bytes are unique.
+            for uniqueness_attempt in range(1, 4):
+                generated_asset = _generate_visual_asset_with_ai(
+                    slide.slide_index,
+                    query,
+                    assets_dir,
+                    image_gateway,
+                    image_type=image_item.image_type,
+                    purpose=image_item.purpose,
+                    image_prompt=image_item.prompt,
+                    provider_chain=list(image_item.provider_chain),
+                    slide_title=slide.title,
+                    slide_intent=slide.visual_intent,
+                    asset_role=slide.design_plan.asset_role,
+                    image_treatment=slide.design_plan.image_treatment,
+                    composition_archetype=slide.design_plan.composition_archetype,
+                    direction_name=deck.theme.name,
+                    palette=deck.theme.palette,
+                    variation_hint=(
+                        f"Unique visual alternative {uniqueness_attempt} for slide {slide.slide_index}: "
+                        "change the camera angle, subject arrangement, foreground and background balance, "
+                        "lighting direction, and material emphasis while preserving the slide meaning"
+                    ),
+                )
+                generated_hash = (
+                    _visual_asset_hash(generated_asset.path) if generated_asset is not None else ""
+                )
+                if generated_asset is not None and generated_hash and generated_hash not in seen_image_hashes:
+                    asset = generated_asset
+                    break
         if asset is None:
             asset = _write_local_visual_asset(
                 slide.slide_index,
@@ -300,6 +313,7 @@ def _write_cached_visual_asset(asset: VisualAsset, assets_dir: Path) -> None:
         "prompt": asset.prompt,
         "providerChain": asset.provider_chain,
         "attribution": asset.attribution,
+        "contentHash": _visual_asset_hash(asset.path),
     }
     try:
         _asset_sidecar_path(assets_dir, asset.slide_index).write_text(
@@ -572,6 +586,7 @@ def _generate_visual_asset_with_ai(
     composition_archetype: str,
     direction_name: str,
     palette: list[str],
+    variation_hint: str | None = None,
 ) -> VisualAsset | None:
     if image_gateway is None:
         return None
@@ -589,6 +604,11 @@ def _generate_visual_asset_with_ai(
         direction_name=direction_name,
         palette=palette,
     )
+    if variation_hint:
+        prompt += (
+            f" {variation_hint}. This alternative must be visibly different from every other slide asset, "
+            "with no visible text, logos, labels, or watermarks."
+        )
     try:
         generated = image_gateway.generate(
             ImageRequest(

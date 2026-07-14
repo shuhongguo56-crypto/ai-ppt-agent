@@ -514,3 +514,18 @@ Completed on 2026-07-14:
   - Next.js typecheck and production/static-export builds passed.
   - Browser E2E passed with 8 outline slides, 6 visual directions, 43/43 quality checks, editable PPTX download, HyperFrames HTML download, and online preview.
   - Desktop completed-state and 390px mobile viewport checks reported no horizontal overflow.
+
+## Page-specific visual asset uniqueness gate
+
+Completed on 2026-07-14:
+
+- Final visual resolution now hashes the real image bytes for every slide, not merely the provider URL or search query.
+- When a searched/generated asset duplicates an earlier slide, the Image Agent requests up to three page-specific alternatives with deliberately different camera angle, subject arrangement, depth balance, lighting, and material emphasis.
+- Every generated alternative is re-hashed before acceptance. A provider cannot return the same image repeatedly and still be treated as a successful replacement.
+- Asset sidecars now persist `contentHash` for auditability while the quality gate independently recomputes the hash from the actual file.
+- Added `visual_asset_uniqueness` to the research/enterprise baseline and customer-delivery readiness contract. Reused, missing, unreadable, or empty slide images now block export and trigger the existing image refresh/repair loop.
+- Verification:
+  - Render/quality focused tests: 34 passed, including repeated-provider-output recovery and duplicate-binary rejection.
+  - Full Python regression: 346 passed.
+  - Next.js typecheck passed.
+  - Next.js production build passed.
