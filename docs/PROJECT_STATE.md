@@ -529,3 +529,6 @@ Completed on 2026-07-14:
   - Full Python regression: 346 passed.
   - Next.js typecheck passed.
   - Next.js production build passed.
+  - Real-image workflow artifact: `D:\Codex\Outputs\ai-ppt-real-images-20260714234337`.
+  - The real workflow produced 8 slides, 8 distinct PPTX media assets, 1 Wikipedia/Wikimedia asset, 7 Pollinations FLUX assets, and passed all 44 checks including `visual_asset_uniqueness`, `customer_delivery_readiness`, and `enterprise_ppt_baseline`.
+  - The public API was restarted on the current Cloudflare tunnel and returned HTTP 200 with research mode, open-web image search, and free image generation ready.
