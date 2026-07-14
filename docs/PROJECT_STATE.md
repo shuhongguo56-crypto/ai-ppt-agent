@@ -554,3 +554,6 @@ Completed on 2026-07-15:
   - Progressive question reveal passed.
   - Reduced-motion browser reported the materialization animation at effectively zero duration.
   - Visual QA screenshots: `D:\Codex\Outputs\ai-ppt-apple-design-20260715\desktop.png` and `mobile-fixed.png`.
+  - GitHub Pages deployment commit: `50e3f18`.
+  - Public workflow: `https://shuhongguo56-crypto.github.io/ai-ppt-agent/workflow/?v=45368e9`.
+  - Public 390px browser verification passed with the generation service connected, 366px workflow shell, both main cards ending at x=378, and zero document-level horizontal overflow.
