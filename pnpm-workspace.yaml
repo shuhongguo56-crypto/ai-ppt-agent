@@ -4,3 +4,5 @@ packages:
   - packages/ui
 overrides:
   postcss: 8.5.15
+onlyBuiltDependencies:
+  - sharp
