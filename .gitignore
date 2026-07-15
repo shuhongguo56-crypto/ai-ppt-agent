@@ -11,6 +11,7 @@ __pycache__/
 /.local/
 /apps/api/.local/
 /apps/web/out/
+/dist/
 /.pytest-runtime-tmp/
 /.task*-*/
 /test-tmp/
