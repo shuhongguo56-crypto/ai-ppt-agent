@@ -17,7 +17,9 @@ type ProjectListResponse = {
 type ProjectFilter = "all" | "ready" | "active";
 type ProjectStage = "brief" | "outline" | "visual_direction" | "slide_deck" | "render" | "quality";
 
-const defaultApiBase = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000/api").replace(/\/$/, "");
+const defaultApiBase = (
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://timeline-strong-hearing-resolve.trycloudflare.com/api"
+).replace(/\/$/, "");
 
 function normalizeApiBase(value: string) {
   const trimmed = value.trim().replace(/\/$/, "");
