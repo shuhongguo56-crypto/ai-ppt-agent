@@ -298,22 +298,15 @@ const imageTypeLabels: Record<ImageAssetType, string> = {
 
 const audiencePresets = ["本科生 / 课程老师", "论文答辩委员会", "研究小组", "投资人 / 商业评委", "企业内部团队"];
 
-const workflowPromise = [
-  "解析文件",
-  "生成 PPT 大纲",
-  "确认大纲",
-  "推荐视觉",
-  "统一成稿",
-  "导出文件",
-];
-
 const generationStages = [
-  { key: "brief", label: "输入信息", detail: "主题、资料、受众、语言" },
-  { key: "outline", label: "PPT 大纲", detail: "文件解析后先生成可审阅大纲" },
-  { key: "visual", label: "视觉方向", detail: "Frontend-Slides 动态生成多套定制方向" },
-  { key: "deck", label: "逐页设计", detail: "按内容规划每页构图、配图与动效" },
-  { key: "export", label: "下载交付", detail: "PPTX 与 HyperFrames HTML" },
+  { key: "brief", label: "提出需求" },
+  { key: "outline", label: "确认大纲" },
+  { key: "visual", label: "选择风格" },
+  { key: "deck", label: "生成页面" },
+  { key: "export", label: "预览下载" },
 ] as const;
+
+const briefSteps = ["主题", "资料", "受众", "语言", "场景", "模式", "确认"] as const;
 
 type GenerationStageKey = (typeof generationStages)[number]["key"];
 
@@ -604,7 +597,6 @@ export default function WorkflowClient() {
   const [outlineDraft, setOutlineDraft] = useState<OutlineDecision | null>(null);
   const [sourceReports, setSourceReports] = useState<SourceReport[]>([]);
   const [activeVisualDirectionId, setActiveVisualDirectionId] = useState<VisualDirectionId | null>(null);
-  const chatCardRef = useRef<HTMLElement>(null);
   const previewAnimationRef = useRef<Animation | null>(null);
   const previewMotionRef = useRef({ x: 0, y: 0, velocityX: 0, velocityY: 0, time: 0 });
 
@@ -620,6 +612,7 @@ export default function WorkflowClient() {
   const qualityFailed = Boolean(state.qualityReport && !state.qualityReport.passed);
   const qualityPassedCount = state.qualityReport?.checks.filter((check) => check.status === "passed").length ?? 0;
   const qualityTotalCount = state.qualityReport?.checks.length ?? 0;
+  const hasWorkflowOutput = Boolean(isRunning || error || logs.length || state.projectId || canDownload);
   const currentStage: GenerationStageKey = canDownload
     ? "export"
     : state.renderVersion || state.slideDeckVersion
@@ -646,19 +639,6 @@ export default function WorkflowClient() {
     setApiBaseInput(resolvedApiBase);
     void refreshRuntime(resolvedApiBase);
   }, []);
-
-  useEffect(() => {
-    if (conversationStep <= 1 || !chatCardRef.current) return;
-    const frame = window.requestAnimationFrame(() => {
-      const steps = chatCardRef.current?.querySelectorAll<HTMLElement>(".chat-step");
-      const nextStep = steps?.item((steps.length ?? 1) - 1);
-      nextStep?.scrollIntoView({
-        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-        block: "nearest",
-      });
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [conversationStep]);
 
   useEffect(() => () => previewAnimationRef.current?.cancel(), []);
 
@@ -703,7 +683,11 @@ export default function WorkflowClient() {
   }
 
   function revealNext(step: number) {
-    setConversationStep((current) => Math.max(current, step));
+    setConversationStep(step);
+  }
+
+  function revealPrevious() {
+    setConversationStep((current) => Math.max(1, current - 1));
   }
 
   function previewSlide(stage: HTMLDivElement) {
@@ -991,16 +975,20 @@ export default function WorkflowClient() {
         () =>
         request<OutlineGenerateResponse>(`/projects/${projectId}/outline/generate`, {
           method: "POST",
-          body: JSON.stringify(pack ? { sourcePack: pack } : {}),
+          body: JSON.stringify(
+            pack
+              ? { sourcePack: pack, supplementResearch: agentMode !== "fast" }
+              : {},
+          ),
         }),
       );
 
-      if (!pack && outline.sourcePack?.sources?.length) {
+      if (outline.sourcePack?.sources?.length) {
         setSourceReports(outline.sourcePack.sources.map((source) => buildSourceReport(source)));
         const providers = outline.research?.providers.join("、") || "本地研究降级";
         push(
-          outline.research?.mode === "web" ? "联网研究完成" : "联网研究降级",
-          outline.research?.mode === "web"
+          outline.research?.mode.includes("web") ? "联网研究完成" : "联网研究降级",
+          outline.research?.mode.includes("web")
             ? `已从 ${providers} 获取 ${outline.sourcePack.sources.length} 个公开来源，大纲将引用这些资料。`
             : "公开资料暂时不可用，已明确标记为本地研究框架；涉及事实和数据的内容仍需联网来源验证。",
         );
@@ -1367,54 +1355,54 @@ export default function WorkflowClient() {
             <a href="/projects">项目库</a>
             <span className={`connection-chip ${apiConnection}`}>
               <i aria-hidden="true" />
-              {apiConnection === "connected" ? "生成服务在线" : apiConnection === "checking" ? "正在连接" : "服务离线"}
+              {apiConnection === "connected" ? "准备就绪" : apiConnection === "checking" ? "准备中" : "暂不可用"}
             </span>
           </div>
         </nav>
         <div className="workflow-intro">
-          <p className="eyebrow">AI PPT Studio</p>
-          <h1>把资料变成一份真正能交付的 PPT。</h1>
-          <p className="lead">
-            像聊天一样回答当前问题。系统会先理解资料并给出大纲，等你确认后，再完成视觉设计、逐页配图和双格式导出。
-          </p>
-          <div className="workflow-promise" aria-label="生成流程">
-            {workflowPromise.map((item) => (
-              <span key={item}>{item}</span>
-            ))}
-          </div>
-          <div className="studio-showcase" aria-label="PPT 生成影棚预览">
-            <div
-              className="studio-stage"
-              aria-hidden="true"
-              onPointerDown={handlePreviewPointerDown}
-              onPointerMove={(event) => {
-                if (event.currentTarget.hasPointerCapture(event.pointerId)) updatePreviewFromPointer(event);
-              }}
-              onPointerUp={releasePreview}
-              onPointerCancel={releasePreview}
-            >
-              <div className="studio-slide">
-                <span>01</span>
-                <strong>{topic.trim() || "高级定制 PPT"}</strong>
-                <em>Outline → Visual Direction → PPTX / HTML</em>
-              </div>
-              <div className="studio-orbit studio-orbit-one" />
-              <div className="studio-orbit studio-orbit-two" />
+          <div className="customer-hero">
+            <div className="customer-hero-copy">
+              <p className="eyebrow">AI PRESENTATION STUDIO</p>
+              <h1>让内容，<br />值得被看见。</h1>
+              <p className="lead">输入主题或文件，下一步即可。</p>
+              <a className="hero-start" href="#ppt-brief">
+                开始创作
+                <span aria-hidden="true">↘</span>
+              </a>
             </div>
-            <div className="studio-copy">
-              <strong>先把逻辑讲清楚，再把每一页做漂亮。</strong>
-              <p>资料理解、图片检索与交付检查在后台完成；你只需要做必要选择。</p>
+            <div className="studio-showcase" aria-label="PPT 视觉方向动态预览">
+              <div
+                className="studio-stage"
+                aria-hidden="true"
+                onPointerDown={handlePreviewPointerDown}
+                onPointerMove={(event) => {
+                  if (event.currentTarget.hasPointerCapture(event.pointerId)) updatePreviewFromPointer(event);
+                }}
+                onPointerUp={releasePreview}
+                onPointerCancel={releasePreview}
+              >
+                <div className="studio-backdrop studio-backdrop-one" />
+                <div className="studio-backdrop studio-backdrop-two" />
+                <div className="studio-slide">
+                  <span>VISION / 01</span>
+                  <strong>{topic.trim() || "让洞察成为画面的主角"}</strong>
+                  <em>CONTENT-LED PRESENTATION</em>
+                  <div className="studio-slide-art" />
+                </div>
+              </div>
+              <div className="studio-copy">
+                <strong>每份内容，都有自己的视觉语言。</strong>
+              </div>
             </div>
           </div>
           <details className={`runtime-banner api-health ${apiConnection}`}>
             <summary className="runtime-summary">
               <span className="runtime-status-line">
-                <strong>专业设置：</strong>
-                {apiConnection === "connected" ? <span>生成服务已连接</span> : null}
-                {apiConnection === "checking" ? <span>正在检查生成服务…</span> : null}
-                {apiConnection === "error" ? <span>生成服务未连接</span> : null}
+                <strong>专业设置</strong>
+                {apiConnection === "connected" ? <span>在线</span> : null}
+                {apiConnection === "checking" ? <span>连接中</span> : null}
+                {apiConnection === "error" ? <span>离线</span> : null}
               </span>
-              <small>{runtime ? "API、模型与图片链路已折叠" : "点击展开可切换 API 地址"}</small>
             </summary>
             <div className="runtime-panel">
               <label className="api-base-control">
@@ -1521,13 +1509,12 @@ export default function WorkflowClient() {
           </details>
         </div>
 
-        <div className={`workflow-console${canDownload ? " delivery-ready" : ""}`}>
-          <section ref={chatCardRef} className={`run-card chat-card${canDownload ? " completed" : ""}`} aria-busy={isRunning} aria-label="PPT 对话式生成表单">
+        <div className={`workflow-console${canDownload ? " delivery-ready" : ""}${hasWorkflowOutput ? " has-output" : " is-briefing"}`}>
+          <section id="ppt-brief" className={`run-card chat-card wizard-card${canDownload ? " completed" : ""}`} aria-busy={isRunning} aria-label="PPT 分页生成向导">
             {canDownload ? (
               <div className="completed-brief">
                 <span>本次任务</span>
                 <h3>{topic}</h3>
-                <p>已经按确认后的大纲和视觉方向生成完毕，右侧可直接预览或下载。</p>
                 <div>
                   <em>{state.slideDeck?.slides.length ?? 0} 页</em>
                   <em>{languageLabel(outputLanguage)}</em>
@@ -1539,194 +1526,205 @@ export default function WorkflowClient() {
               </div>
             ) : (
               <>
-            <div className="chat-step">
-              <div className="bot-bubble">
-                <span>1</span>
-                <p>你想做一个什么主题的 PPT？</p>
-              </div>
-              <textarea
-                aria-label="PPT 主题"
-                value={topic}
-                placeholder="例如：面向本科生的 CRISPR 基因编辑课程汇报"
-                onChange={(event) => setTopic(event.target.value)}
-              />
-              <button className="button primary run-button" type="button" disabled={!topic.trim()} onClick={() => revealNext(2)}>
-                继续
-              </button>
-            </div>
-
-            {conversationStep >= 2 ? (
-              <div className="chat-step">
-                <div className="user-bubble">{topic}</div>
-                <div className="bot-bubble">
-                  <span>2</span>
-                  <p>有没有资料要给我参考？没有也可以跳过。</p>
-                </div>
-                <textarea
-                  aria-label="参考资料"
-                  value={sourceText}
-                  placeholder="粘贴资料摘要、课程要求、论文摘要、汇报重点……"
-                  onChange={(event) => setSourceText(event.target.value)}
-                />
-                <label className="file-upload">
-                  上传资料（可选）
-                  <input
-                    aria-label="上传参考资料文件"
-                    type="file"
-                    multiple
-                    accept=".txt,.md,.docx,.pptx,.pdf,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                    onChange={(event) => importFiles(event.target.files)}
-                  />
-                </label>
-                {uploadedFiles.length > 0 ? (
-                  <div className="file-list">
-                    {uploadedFiles.map((file) => (
-                      <span key={`${file.name}-${file.size}`}>{file.name}</span>
-                    ))}
+                <header className="wizard-header">
+                  <button
+                    className="wizard-back"
+                    type="button"
+                    disabled={conversationStep === 1}
+                    onClick={revealPrevious}
+                    aria-label="返回上一步"
+                  >
+                    <span aria-hidden="true">←</span>
+                    <em>上一步</em>
+                  </button>
+                  <div className="wizard-position">
+                    <small>创建 PPT</small>
+                    <strong>{briefSteps[conversationStep - 1]}</strong>
                   </div>
-                ) : null}
-                <div className="source-process-note">
-                  <strong>资料会先被研究或解析，不会直接套模板。</strong>
-                  <span>有文件时先解析成 SourcePack；没有文件时自动检索公开资料。HumanizePPT 只从 SourcePack 生成大纲，确认后才进入视觉方向。</span>
+                  <span className="wizard-count">{conversationStep} / {briefSteps.length}</span>
+                </header>
+                <div className="wizard-meter" aria-hidden="true">
+                  <i style={{ width: `${(conversationStep / briefSteps.length) * 100}%` }} />
                 </div>
-                <button className="button primary run-button" type="button" onClick={() => revealNext(3)}>
-                  {sourceText.trim() || uploadedFiles.length > 0 ? "资料已添加，继续" : "不上传资料，联网研究"}
-                </button>
-              </div>
-            ) : null}
 
-            {conversationStep >= 3 ? (
-              <div className="chat-step">
-                <div className="bot-bubble">
-                  <span>3</span>
-                  <p>这份 PPT 是给谁看的？</p>
-                </div>
-                <input
-                  aria-label="PPT 受众"
-                  value={audience}
-                  placeholder="例如：本科生 / 课程老师"
-                  onChange={(event) => setAudience(event.target.value)}
-                />
-                <div className="option-grid compact">
-                  {audiencePresets.map((item) => (
-                    <button
-                      className={`option-card ${audience === item ? "selected" : ""}`}
-                      key={item}
-                      type="button"
-                      onClick={() => {
-                        setAudience(item);
-                        revealNext(4);
-                      }}
-                    >
-                      {item}
-                    </button>
-                  ))}
-                </div>
-                <button className="button primary run-button" type="button" disabled={!audience.trim()} onClick={() => revealNext(4)}>
-                  继续
-                </button>
-              </div>
-            ) : null}
+                <div className="wizard-viewport">
+                  {conversationStep === 1 ? (
+                    <div className="chat-step wizard-page" key="topic">
+                      <div className="wizard-question">
+                        <small>01</small>
+                        <h2>你想做什么主题？</h2>
+                      </div>
+                      <textarea
+                        aria-label="PPT 主题"
+                        value={topic}
+                        placeholder="例如：面向本科生的 CRISPR 基因编辑课程汇报"
+                        onChange={(event) => setTopic(event.target.value)}
+                      />
+                      <button className="button primary run-button wizard-next" type="button" disabled={!topic.trim()} onClick={() => revealNext(2)}>
+                        下一步 <span aria-hidden="true">→</span>
+                      </button>
+                    </div>
+                  ) : null}
 
-            {conversationStep >= 4 ? (
-              <div className="chat-step">
-                <div className="bot-bubble">
-                  <span>4</span>
-                  <p>希望输出成哪种语言？</p>
-                </div>
-                <div className="option-grid compact">
-                  {outputLanguages.map((item) => (
-                    <button
-                      className={`option-card ${outputLanguage === item.value ? "selected" : ""}`}
-                      key={item.value}
-                      type="button"
-                      onClick={() => {
-                        setOutputLanguage(item.value);
-                        revealNext(5);
-                      }}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
+                  {conversationStep === 2 ? (
+                    <div className="chat-step wizard-page" key="source">
+                      <div className="wizard-question">
+                        <small>02</small>
+                        <h2>有参考资料吗？</h2>
+                      </div>
+                      <textarea
+                        aria-label="参考资料"
+                        value={sourceText}
+                        placeholder="粘贴文字，或直接上传文件"
+                        onChange={(event) => setSourceText(event.target.value)}
+                      />
+                      <label className="file-upload wizard-upload">
+                        选择文件
+                        <input
+                          aria-label="上传参考资料文件"
+                          type="file"
+                          multiple
+                          accept=".txt,.md,.docx,.pptx,.pdf,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                          onChange={(event) => importFiles(event.target.files)}
+                        />
+                      </label>
+                      {uploadedFiles.length > 0 ? (
+                        <div className="file-list">
+                          {uploadedFiles.map((file) => (
+                            <span key={`${file.name}-${file.size}`}>{file.name}</span>
+                          ))}
+                        </div>
+                      ) : null}
+                      <button className="button primary run-button wizard-next" type="button" onClick={() => revealNext(3)}>
+                        下一步 <span aria-hidden="true">→</span>
+                      </button>
+                    </div>
+                  ) : null}
 
-            {conversationStep >= 5 ? (
-              <div className="chat-step">
-                <div className="bot-bubble">
-                  <span>5</span>
-                  <p>这更像哪一种场景？</p>
-                </div>
-                <div className="option-grid compact">
-                  {deckTypes.map((item) => (
-                    <button
-                      className={`option-card ${deckType === item.value ? "selected" : ""}`}
-                      key={item.value}
-                      type="button"
-                      onClick={() => {
-                        setDeckType(item.value);
-                        revealNext(6);
-                      }}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
+                  {conversationStep === 3 ? (
+                    <div className="chat-step wizard-page" key="audience">
+                      <div className="wizard-question">
+                        <small>03</small>
+                        <h2>这份 PPT 给谁看？</h2>
+                      </div>
+                      <input
+                        aria-label="PPT 受众"
+                        value={audience}
+                        placeholder="输入受众，或选择下方选项"
+                        onChange={(event) => setAudience(event.target.value)}
+                      />
+                      <div className="option-grid compact wizard-options">
+                        {audiencePresets.map((item) => (
+                          <button
+                            className={`option-card ${audience === item ? "selected" : ""}`}
+                            key={item}
+                            type="button"
+                            onClick={() => setAudience(item)}
+                          >
+                            {item}
+                          </button>
+                        ))}
+                      </div>
+                      <button className="button primary run-button wizard-next" type="button" disabled={!audience.trim()} onClick={() => revealNext(4)}>
+                        下一步 <span aria-hidden="true">→</span>
+                      </button>
+                    </div>
+                  ) : null}
 
-            {conversationStep >= 6 ? (
-              <div className="chat-step">
-                <div className="bot-bubble">
-                  <span>6</span>
-                  <p>选择生成层级。默认用研究模式，让输出按企业级/竞赛级 PPT 基线跑。</p>
-                </div>
-                <div className="option-grid compact agent-choice-grid">
-                  {agentModes.map((item) => (
-                    <button
-                      className={`option-card agent-choice-card ${agentMode === item.value ? "selected" : ""}`}
-                      key={item.value}
-                      type="button"
-                      onClick={() => {
-                        setAgentMode(item.value);
-                        revealNext(7);
-                      }}
-                    >
-                      <strong>{item.label}</strong>
-                      <small>{item.note}</small>
-                    </button>
-                  ))}
-                </div>
-                <button className="button primary run-button" type="button" onClick={() => revealNext(7)}>
-                  按{agentModes.find((item) => item.value === agentMode)?.label ?? agentMode}继续
-                </button>
-              </div>
-            ) : null}
+                  {conversationStep === 4 ? (
+                    <div className="chat-step wizard-page" key="language">
+                      <div className="wizard-question">
+                        <small>04</small>
+                        <h2>使用哪种语言？</h2>
+                      </div>
+                      <div className="option-grid compact wizard-options">
+                        {outputLanguages.map((item) => (
+                          <button
+                            className={`option-card ${outputLanguage === item.value ? "selected" : ""}`}
+                            key={item.value}
+                            type="button"
+                            onClick={() => setOutputLanguage(item.value)}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                      <button className="button primary run-button wizard-next" type="button" onClick={() => revealNext(5)}>
+                        下一步 <span aria-hidden="true">→</span>
+                      </button>
+                    </div>
+                  ) : null}
 
-            {conversationStep >= 7 ? (
-              <div className="chat-step final-step">
-                <div className="bot-bubble">
-                  <span>✓</span>
-                  <p>信息够了。我会先解析资料并生成 PPT 大纲。你确认大纲后，我会按内容复杂度生成多套视觉方案。</p>
-                </div>
-                <div className="answer-summary">
-                  <span>{languageLabel(outputLanguage)}</span>
-                  <span>{deckTypeLabel(deckType)}</span>
-                  <span>{agentModes.find((item) => item.value === agentMode)?.label ?? agentMode}</span>
-                </div>
-                <button className="button primary run-button" type="button" disabled={isRunning} onClick={() => void createProjectAndOutline()}>
-                  {isRunning ? "正在生成 PPT 大纲…" : "解析资料并生成 PPT 大纲"}
-                </button>
-                <button className="button ghost-button run-button" type="button" disabled={isRunning} onClick={resetConversation}>
-                  重新回答
-                </button>
-              </div>
-            ) : null}
+                  {conversationStep === 5 ? (
+                    <div className="chat-step wizard-page" key="scene">
+                      <div className="wizard-question">
+                        <small>05</small>
+                        <h2>这是哪种场景？</h2>
+                      </div>
+                      <div className="option-grid compact wizard-options">
+                        {deckTypes.map((item) => (
+                          <button
+                            className={`option-card ${deckType === item.value ? "selected" : ""}`}
+                            key={item.value}
+                            type="button"
+                            onClick={() => setDeckType(item.value)}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                      <button className="button primary run-button wizard-next" type="button" onClick={() => revealNext(6)}>
+                        下一步 <span aria-hidden="true">→</span>
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {conversationStep === 6 ? (
+                    <div className="chat-step wizard-page" key="mode">
+                      <div className="wizard-question">
+                        <small>06</small>
+                        <h2>选择生成模式</h2>
+                      </div>
+                      <div className="option-grid compact agent-choice-grid wizard-options">
+                        {agentModes.map((item) => (
+                          <button
+                            className={`option-card agent-choice-card ${agentMode === item.value ? "selected" : ""}`}
+                            key={item.value}
+                            type="button"
+                            onClick={() => setAgentMode(item.value)}
+                          >
+                            <strong>{item.label}</strong>
+                          </button>
+                        ))}
+                      </div>
+                      <button className="button primary run-button wizard-next" type="button" onClick={() => revealNext(7)}>
+                        下一步 <span aria-hidden="true">→</span>
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {conversationStep === 7 ? (
+                    <div className="chat-step wizard-page final-step" key="confirm">
+                      <div className="wizard-question">
+                        <small>07</small>
+                        <h2>准备开始</h2>
+                      </div>
+                      <div className="answer-summary wizard-summary">
+                        <span>{languageLabel(outputLanguage)}</span>
+                        <span>{deckTypeLabel(deckType)}</span>
+                        <span>{agentModes.find((item) => item.value === agentMode)?.label ?? agentMode}</span>
+                      </div>
+                      <button className="button primary run-button wizard-next" type="button" disabled={isRunning} onClick={() => void createProjectAndOutline()}>
+                        {isRunning ? "正在生成…" : "生成大纲"} <span aria-hidden="true">→</span>
+                      </button>
+                    </div>
+                  ) : null}
+                  </div>
               </>
             )}
           </section>
 
+          {hasWorkflowOutput ? (
           <section className="result-card" aria-busy={isRunning} aria-live="polite">
             <p className="eyebrow">你的 PPT</p>
             <h2>{progressText}</h2>
@@ -1738,28 +1736,10 @@ export default function WorkflowClient() {
                 return (
                   <li className={stateClass} key={stage.key}>
                     <span>{stage.label}</span>
-                    <small>{stage.detail}</small>
                   </li>
                 );
               })}
             </ol>
-            <div className="delivery-console" aria-label="交付质量控制台">
-              <article>
-                <small>Story</small>
-                <strong>先把逻辑讲清楚</strong>
-                <p>先生成可审阅大纲，确认后再进入设计，避免漂亮但空洞。</p>
-              </article>
-              <article>
-                <small>Design</small>
-                <strong>每页都有视觉主角</strong>
-                <p>自动规划版式、层次、配图和动效，不让文字和图片互相抢位。</p>
-              </article>
-              <article>
-                <small>Delivery</small>
-                <strong>{state.qualityReport?.passed ? "已达到交付标准" : "生成后自动把关"}</strong>
-                <p>{qualityTotalCount ? `${qualityPassedCount}/${qualityTotalCount} 项质检通过。` : "通过后才会开放下载。"}</p>
-              </article>
-            </div>
             {error ? <pre className="error-box">{error}</pre> : null}
             {isRunning ? (
               <div className="ppt-progress">
@@ -1938,10 +1918,13 @@ export default function WorkflowClient() {
 
             {hasVisualChoices && state.visualDecision ? (
               <div className="visual-choice-panel">
-                <h3>选择一套视觉方案</h3>
-                <p>这些方案不是固定模板填字，而是 Frontend-Slides 与 HyperFrames 共同根据你的大纲、受众、资料密度和模式动态生成的候选方向。每套都包含不同的构图系统、动效节奏、层次结构、配图检索策略和 HTML 动态演示方案。</p>
+                <div className="visual-choice-heading">
+                  <span>最后一步</span>
+                  <h3>选一个你喜欢的感觉</h3>
+                  <p>点击预览，立即生成 PPT 与动态演示。</p>
+                </div>
                 <div className="visual-direction-grid">
-                  {state.visualDecision.directions.map((direction) => {
+                  {state.visualDecision.directions.map((direction, directionIndex) => {
                     const isActiveDirection = activeVisualDirectionId === direction.directionId;
                     return (
                     <button
@@ -1954,27 +1937,29 @@ export default function WorkflowClient() {
                       onClick={() => void finishWithVisualDirection(direction)}
                     >
                       <div className="visual-direction-preview" style={visualPreviewStyle(direction)} aria-hidden="true">
-                        <div className="preview-slide">
-                          <em>{deckTypeLabel(activeOutline?.deckType ?? deckType)}</em>
-                          <b>{(activeOutline?.slides[0]?.title ?? topic.trim()) || direction.name}</b>
-                          <div className="preview-card-row">
-                            {direction.layoutPrinciples.slice(0, 3).map((principle) => (
-                              <div className="preview-mini-card" key={`${direction.directionId}-${principle}`}>
-                                {principle}
-                              </div>
-                            ))}
+                        <div className={`preview-slide preview-layout-${directionIndex % 4}`}>
+                          <div className="preview-copy">
+                            <em>{deckTypeLabel(activeOutline?.deckType ?? deckType)}</em>
+                            <b>{(activeOutline?.slides[0]?.title ?? topic.trim()) || direction.name}</b>
                           </div>
+                          <div className="preview-art" />
+                          <div className="preview-rule" />
                         </div>
                       </div>
-                      <span>{visualDirectionLabel(direction.directionId)}</span>
-                      <strong>{direction.name}</strong>
-                      <small>{direction.mood}</small>
-                      <div className="direction-chip-row" aria-label="视觉方案特点">
-                        {[...direction.layoutPrinciples, ...direction.motionPlan, ...direction.imageStrategy].slice(0, 4).map((item) => (
-                          <em key={`${direction.directionId}-${item}`}>{item}</em>
-                        ))}
+                      <div className="direction-summary">
+                        <div>
+                          <strong>{direction.name}</strong>
+                        </div>
+                        <div className="direction-palette" aria-label="方案配色">
+                          {direction.palette.slice(0, 4).map((color, colorIndex) => (
+                            <span
+                              key={`${direction.directionId}-${color}-${colorIndex}`}
+                              style={{ background: colorOr(color, colorIndex === 0 ? "#0B0F19" : "#F8FAFC") }}
+                            />
+                          ))}
+                        </div>
                       </div>
-                      <i>{isActiveDirection ? "正在选择并生成 PPTX / HTML…" : "选择这套方向并导出"}</i>
+                      <i>{isActiveDirection ? "正在生成…" : "选择此方案 →"}</i>
                     </button>
                     );
                   })}
@@ -2129,6 +2114,7 @@ export default function WorkflowClient() {
               </details>
             ) : null}
           </section>
+          ) : null}
         </div>
       </section>
     </main>

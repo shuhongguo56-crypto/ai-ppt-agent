@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from ai_ppt_contracts import SourcePack
 from app.config import Settings
 from app.main import create_app
+from app.services.research import TopicResearchResult
 
 
 PROJECT = {
@@ -29,6 +30,86 @@ def generate_outline(client, project_id: str = "project-outline", body: dict | N
         f"/api/projects/{project_id}/outline/generate",
         json={} if body is None else body,
     )
+
+
+def test_research_mode_supplements_supplied_sources_without_replacing_them(
+    client, monkeypatch
+) -> None:
+    project = {
+        **PROJECT,
+        "projectId": "project-supplied-plus-research",
+        "outputLanguage": "zh",
+        "deckType": "business_pitch",
+        "topic": "新能源汽车品牌下一阶段增长",
+        "audience": "企业管理层",
+        "agentMode": "research",
+    }
+    client.app.state.settings.topic_research_enabled = True
+    assert create_project(client, project).status_code == 201
+    supplied = {
+        "schemaVersion": "1.0.0",
+        "projectId": project["projectId"],
+        "sources": [
+            {
+                "schemaVersion": "1.0.0",
+                "sourceId": "supplied-notes",
+                "sourceType": "text",
+                "title": "用户资料",
+                "summary": "\n".join(
+                    [
+                        "核心主题：新能源汽车增长",
+                        "文章主旨：企业需要从规模扩张转向利润、品牌心智与组织效率并重。",
+                        "关键论点：",
+                        "- 行业竞争已转向产品、成本、渠道与全球化能力。",
+                        "- 用户更关注补能体验、可信度与全生命周期成本。",
+                    ]
+                ),
+            }
+        ],
+    }
+    supplement = SourcePack(
+        schemaVersion="1.0.0",
+        projectId=project["projectId"],
+        sources=[
+            {
+                "schemaVersion": "1.0.0",
+                "sourceId": "public-source",
+                "sourceType": "url",
+                "title": "行业公开资料",
+                "url": "https://example.com/industry",
+                "summary": "核心主题：新能源汽车行业\n文章主旨：公开资料用于交叉验证行业变化。",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "app.routes.outline.research_topic_sources",
+        lambda **_: TopicResearchResult(
+            source_pack=supplement,
+            mode="web",
+            providers=["test-provider"],
+            query=project["topic"],
+            warnings=[],
+        ),
+    )
+
+    response = generate_outline(
+        client,
+        project["projectId"],
+        body={"sourcePack": supplied, "supplementResearch": True},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["research"]["mode"] == "supplied_plus_web"
+    assert [source["sourceId"] for source in payload["sourcePack"]["sources"]] == [
+        "supplied-notes",
+        "public-source",
+    ]
+    visible = " ".join(
+        slide["title"] for slide in payload["outlineDecision"]["slides"]
+    )
+    assert "补贴" not in visible
+    assert "咖啡" not in visible
 
 
 def test_generate_outline_creates_draft_checkpoint(client) -> None:

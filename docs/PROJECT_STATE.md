@@ -148,6 +148,7 @@ Implemented foundation areas:
 - HyperFrames HTML renderer with layout-specific dynamic presentation frames.
 - Impeccable product context for the web app (`apps/web/PRODUCT.md`) plus local live-mode config for future design iteration.
 - Web UI polish pass: homepage copy now frames the product as content-aware visual-direction generation rather than template swapping; `/workflow` now has a clearer user-facing generation stage rail, compact cascade provider-chain pills, scoped visual-direction previews, stronger focus states, reduced-motion handling, and more professional visual-direction evidence cards.
+- Customer-facing gallery pass: `/workflow` now defaults to a short outcome-led hero, an original MotionSites-inspired dynamic PPT gallery, and a true seven-screen briefing wizard. Only the current question renders; `下一步` replaces the page with a horizontal transition, previous answers do not accumulate, and the result view stays hidden until generation starts. API/model/image/provider explanations and design diagnostics remain available only through a compact fixed `专业设置` control. Desktop and 390px mobile audits confirmed one visible wizard page, stable scroll position across steps, no horizontal overflow, and no backend terms in the collapsed customer view. Reusable art-direction prompts live in `docs/FRONTEND_VISUAL_PROMPTS.md`.
 - Project library page (`/projects`) with real local project history, search/filter controls, generation progress rails, readable fallbacks for corrupted legacy smoke-test text, and direct preview/download links for completed PPTX + HyperFrames HTML exports.
 - Strict outline-first generation gate: outline generation always creates a draft review checkpoint, including one-click mode; visual directions, SlideDeck assembly, render, and export remain blocked until the outline is explicitly confirmed.
 - SlideDeck/render content provenance hardening: generated slide titles, subtitles, block text, visual intent, and speaker notes now derive from `OutlineDecision` fields only; renderer no longer injects visible fixed labels such as section markers, card role labels, theme names, or generic closing copy into PPTX/HyperFrames slide content.
@@ -557,3 +558,19 @@ Completed on 2026-07-15:
   - GitHub Pages deployment commit: `50e3f18`.
   - Public workflow: `https://shuhongguo56-crypto.github.io/ai-ppt-agent/workflow/?v=45368e9`.
   - Public 390px browser verification passed with the generation service connected, 366px workflow shell, both main cards ending at x=378, and zero document-level horizontal overflow.
+
+## Content depth, page-rhythm, and visual-choice quality pass
+
+Completed on 2026-07-15:
+
+- Research and enterprise modes can now supplement a user-supplied SourcePack with public research instead of skipping research whenever a file or pasted text exists. The user's material remains first in source order and supplemental sources are deduplicated.
+- Public-source retrieval now applies strict relevance filtering to long Chinese topics. Irrelevant scholarly results are rejected; an explicit local evidence-gap brief is safer than contaminating a deck with an unrelated paper.
+- Fixed a broad retail classifier that treated any topic containing “品牌” as a Luckin/coffee case. Retail fallback now requires a named Luckin case or multiple actual retail markers.
+- Removed internal planning scaffolds such as “封面直接给出主题” and “结尾页回到原文主旨” from customer-visible outline claims.
+- Added a source-grounded business storyline fallback with distinct jobs for context, mechanism, evidence boundary, insight, strategic priorities, success metrics, and conclusion. Adjacent pages no longer paraphrase one thesis repeatedly.
+- Canonical page planning now enforces anchor/dense/breathing rhythm, adjacent archetype/treatment changes, and unique composition signatures. The PPTX renderer has visibly different agenda, framework, evidence, insight, recommendation, and conclusion geometries while keeping text and image safe zones separate.
+- The final visual-direction selector now shows only the preview, direction name, palette, and selection action. Repeated direction copy and long mood/implementation text were removed. Preview frames use explicit aspect ratios, clipping, min-width safety, and mobile containment.
+- Browser QA passed at 1440px and 390px: six direction cards stayed inside the grid/viewport, every preview stayed inside its card, document horizontal overflow was zero, and no console or network errors were recorded.
+- Delivery QA project `qa-delivery-20260715130540` produced 8 page-specific composition variants, 8 visual assets, editable PPTX, HyperFrames HTML, and a 44/44 `ready` quality result.
+- QA artifacts: `D:\Codex\Outputs\ai-ppt-final-qa-20260715-v2` and `D:\Codex\Outputs\ai-ppt-ui-qa-20260715`.
+- Verification: 347 Python tests passed and the Next.js production build passed.

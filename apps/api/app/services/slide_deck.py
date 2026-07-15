@@ -74,6 +74,8 @@ def assemble_slide_deck(
     design_system_id, design_seed = _design_system_identity(outline, selected.direction_id)
     slides = []
     previous_archetype: str | None = None
+    previous_treatment: str | None = None
+    used_archetypes: dict[str, int] = {}
     seen_title_fingerprints: set[str] = set()
     for slide in outline.slides:
         slide_title = _unique_slide_title(slide, outline.language, seen_title_fingerprints)
@@ -83,8 +85,13 @@ def assemble_slide_deck(
             direction_id=selected.direction_id,
             design_seed=design_seed,
             previous_archetype=previous_archetype,
+            previous_treatment=previous_treatment,
+            used_archetypes=used_archetypes,
+            slide_count=len(outline.slides),
         )
         previous_archetype = design_plan["compositionArchetype"]
+        previous_treatment = design_plan["imageTreatment"]
+        used_archetypes[previous_archetype] = used_archetypes.get(previous_archetype, 0) + 1
         labels = _block_labels(outline.language)
         blocks = [
             {
@@ -303,7 +310,8 @@ def repair_slide_deck_for_quality(
                 archetype = next(item for item in pool if item != previous_archetype)
             plan = slide_payload["designPlan"]
             plan["compositionArchetype"] = archetype
-            plan["compositionVariant"] = f"quality-repair-{repair_pass}-{slide_index % 3 + 1}"
+            rhythm = _page_rhythm(slide_index, len(payload["slides"]))
+            plan["compositionVariant"] = f"{rhythm}-quality-repair-{repair_pass}-{slide_index}"
             treatments = _ARCHETYPE_TREATMENTS[archetype]
             plan["imageTreatment"] = treatments[(slide_index + repair_pass) % len(treatments)]
             plan["motionPreset"] = _ARCHETYPE_MOTION[archetype]
@@ -490,6 +498,9 @@ def _plan_slide_design(
     direction_id: str,
     design_seed: int,
     previous_archetype: str | None,
+    previous_treatment: str | None,
+    used_archetypes: dict[str, int],
+    slide_count: int,
 ) -> dict:
     content = " ".join(
         [
@@ -505,23 +516,38 @@ def _plan_slide_design(
         f"{design_seed}|{direction_id}|{slide.slide_index}|{slide.purpose}|{content}"
     )
     pool = _PURPOSE_ARCHETYPES[str(slide.purpose)]
-    archetype = _content_led_archetype(slide, content) or pool[token % len(pool)]
-    if archetype == previous_archetype:
-        alternatives = [item for item in pool if item != previous_archetype]
-        archetype = alternatives[token % len(alternatives)]
+    preferred = _content_led_archetype(slide, content)
+    rhythm = _page_rhythm(slide.slide_index, slide_count)
+    archetype = max(
+        pool,
+        key=lambda item: _archetype_score(
+            item,
+            preferred=preferred,
+            rhythm=rhythm,
+            used_count=used_archetypes.get(item, 0),
+            is_previous=item == previous_archetype,
+            token=token,
+        ),
+    )
 
     treatments = _ARCHETYPE_TREATMENTS[archetype]
-    image_treatment = treatments[(token // 7) % len(treatments)]
+    treatment_candidates = [item for item in treatments if item != previous_treatment] or list(treatments)
+    image_treatment = treatment_candidates[(token // 7) % len(treatment_candidates)]
     asset_role = _asset_role(slide, archetype)
     density = _content_density(slide)
     explanation_mode = _explanation_mode(slide, archetype, content)
     diagram_labels = _diagram_labels(slide)
     visual_brief = _visual_brief(slide, diagram_labels)
-    variant_axis = ("left-anchor", "right-anchor", "center-axis", "asymmetric-grid")[(token // 13) % 4]
+    variant_axes = {
+        "anchor": ("asymmetric-grid", "left-anchor", "right-anchor"),
+        "dense": ("evidence-rail", "modular-map", "stepped-grid"),
+        "breathing": ("center-axis", "editorial-offset", "horizon-line"),
+    }[rhythm]
+    variant_axis = variant_axes[(token // 13) % len(variant_axes)]
     return {
         "schemaVersion": "1.0.0",
         "compositionArchetype": archetype,
-        "compositionVariant": f"{variant_axis}-{(token % 3) + 1}",
+        "compositionVariant": f"{rhythm}-{variant_axis}-{slide.slide_index}",
         "imageTreatment": image_treatment,
         "assetRole": asset_role,
         "assetQuery": _page_asset_query(outline, slide, asset_role, visual_brief),
@@ -535,10 +561,43 @@ def _plan_slide_design(
         "diagramLabels": diagram_labels,
         "motionPreset": _ARCHETYPE_MOTION[archetype],
         "rationale": _award_grade_rationale(
-            _design_rationale(slide, archetype, image_treatment, density, outline.language),
+            (
+                f"Page rhythm: {rhythm}. "
+                + _design_rationale(slide, archetype, image_treatment, density, outline.language)
+            ),
             outline.language,
         ),
     }
+
+
+def _page_rhythm(slide_index: int, slide_count: int) -> str:
+    if slide_index == 1:
+        return "anchor"
+    if slide_index == slide_count:
+        return "breathing"
+    return ("anchor", "dense", "breathing")[(slide_index - 1) % 3]
+
+
+def _archetype_score(
+    archetype: str,
+    *,
+    preferred: str | None,
+    rhythm: str,
+    used_count: int,
+    is_previous: bool,
+    token: int,
+) -> int:
+    rhythm_fit = {
+        "anchor": {"cinematic_hero", "architectural_cover", "statement_focus", "diagonal_story", "priority_stack"},
+        "dense": {"chapter_index", "proof_mosaic", "data_landscape", "process_ribbon", "system_map", "split_comparison"},
+        "breathing": {"editorial_cover", "editorial_split", "statement_focus", "closing_echo", "manifesto_close", "future_horizon"},
+    }
+    score = 24 if archetype == preferred else 0
+    score += 12 if used_count == 0 else 3 if used_count == 1 else -10 * used_count
+    score += 8 if archetype in rhythm_fit[rhythm] else 0
+    score -= 100 if is_previous else 0
+    score += (token + sum(ord(character) for character in archetype)) % 5
+    return score
 
 
 def _stable_token(value: str) -> int:

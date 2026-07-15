@@ -733,15 +733,28 @@ def _competition_visual_variety_check(slide_deck: SlideDeck) -> dict[str, str]:
     archetypes = [slide.design_plan.composition_archetype for slide in slide_deck.slides]
     treatments = [slide.design_plan.image_treatment for slide in slide_deck.slides]
     motions = [slide.design_plan.motion_preset for slide in slide_deck.slides]
+    signatures = [
+        (
+            slide.design_plan.composition_archetype,
+            slide.design_plan.image_treatment,
+            slide.design_plan.composition_variant,
+        )
+        for slide in slide_deck.slides
+    ]
+    rhythms = [slide.design_plan.composition_variant.split("-", 1)[0] for slide in slide_deck.slides]
     slide_count = len(slide_deck.slides)
     required_archetypes = 5 if slide_count >= 8 else 4 if slide_count >= 6 else min(3, slide_count)
     required_treatments = 3 if slide_count >= 6 else min(2, slide_count)
     required_motions = 3 if slide_count >= 6 else min(2, slide_count)
+    required_signatures = max(1, round(slide_count * 0.85))
+    required_rhythms = 3 if slide_count >= 6 else min(2, slide_count)
     no_adjacent_repeats = all(left != right for left, right in zip(archetypes, archetypes[1:]))
     passed = (
         len(set(archetypes)) >= required_archetypes
         and len(set(treatments)) >= required_treatments
         and len(set(motions)) >= required_motions
+        and len(set(signatures)) >= required_signatures
+        and len(set(rhythms)) >= required_rhythms
         and no_adjacent_repeats
     )
     return {
@@ -749,10 +762,11 @@ def _competition_visual_variety_check(slide_deck: SlideDeck) -> dict[str, str]:
         "name": "competition_visual_variety",
         "status": "passed" if passed else "failed",
         "detail": (
-            f"Deck uses {len(set(archetypes))} composition archetypes, {len(set(treatments))} image treatments, and {len(set(motions))} motion presets."
+            f"Deck uses {len(set(archetypes))} composition archetypes, {len(set(signatures))} unique page signatures, {len(set(rhythms))} page rhythms, {len(set(treatments))} image treatments, and {len(set(motions))} motion presets."
             if passed
             else (
                 f"Visual system lacks competition-level variety: archetypes {len(set(archetypes))}/{required_archetypes}, "
+                f"signatures {len(set(signatures))}/{required_signatures}, rhythms {len(set(rhythms))}/{required_rhythms}, "
                 f"treatments {len(set(treatments))}/{required_treatments}, motions {len(set(motions))}/{required_motions}, "
                 f"adjacentDistinct={no_adjacent_repeats}."
             )

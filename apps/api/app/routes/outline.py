@@ -18,6 +18,7 @@ class OutlineGenerateRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     source_pack: SourcePack | None = Field(default=None, alias="sourcePack")
+    supplement_research: bool = Field(default=False, alias="supplementResearch")
 
 
 class OutlineConfirmRequest(BaseModel):
@@ -69,6 +70,20 @@ def _latest_outline(project_id: str, request: Request):
     return checkpoint
 
 
+def _merge_source_packs(primary: SourcePack, supplement: SourcePack | None) -> SourcePack:
+    if supplement is None:
+        return primary
+    sources = []
+    seen: set[tuple[str, str]] = set()
+    for source in [*primary.sources, *supplement.sources]:
+        identity = (source.source_id.strip().casefold(), (source.url or "").strip().casefold())
+        if identity in seen:
+            continue
+        seen.add(identity)
+        sources.append(source)
+    return SourcePack(schemaVersion="1.0.0", projectId=primary.project_id, sources=sources)
+
+
 @router.post("/generate")
 def generate_outline(
     project_id: str,
@@ -86,7 +101,12 @@ def generate_outline(
             422,
         )
     effective_source_pack = body.source_pack
-    if effective_source_pack is None:
+    should_research = effective_source_pack is None or (
+        body.supplement_research
+        and settings.topic_research_enabled
+        and bool(policy["researchEnabled"])
+    )
+    if should_research:
         enterprise_grade = bool(policy["enterpriseGrade"])
         research_max_sources = int(policy["researchMaxSources"])
         research_timeout_seconds = float(policy["researchTimeoutSeconds"])
@@ -108,7 +128,13 @@ def generate_outline(
             ),
             user_agent=settings.topic_research_user_agent,
         )
-        effective_source_pack = research_result.source_pack
+        if effective_source_pack is None:
+            effective_source_pack = research_result.source_pack
+        else:
+            effective_source_pack = _merge_source_packs(
+                effective_source_pack,
+                research_result.source_pack,
+            )
     else:
         research_result = None
     outline = generate_outline_decision(
@@ -152,7 +178,11 @@ def generate_outline(
         }
         if research_result is None
         else {
-            "mode": research_result.mode,
+            "mode": (
+                f"supplied_plus_{research_result.mode}"
+                if body.source_pack is not None
+                else research_result.mode
+            ),
             "providers": research_result.providers,
             "query": research_result.query,
             "warnings": research_result.warnings,

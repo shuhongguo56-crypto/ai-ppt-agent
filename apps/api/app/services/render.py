@@ -2797,8 +2797,29 @@ def _ppt_title_text(value: str) -> str:
     for separator in ("：", ":", "—", "｜", "|"):
         if separator not in text:
             continue
-        head = text.split(separator, 1)[0].strip(" \t\r\n，。；：、,:;-—–")
+        head, tail = text.split(separator, 1)
+        head = head.strip(" \t\r\n，。；：、,:;-—–")
+        tail = tail.strip(" \t\r\n，。；：、,:;-—–")
         if 2 <= len(head) <= 18 and _display_weight(head) <= 36:
+            generic_heads = {
+                "问题边界",
+                "作用机制",
+                "证据指向",
+                "关键证据",
+                "核心洞察",
+                "因此",
+                "行动优先级",
+                "最终判断",
+                "the real issue",
+                "how it works",
+                "evidence map",
+                "what this means",
+                "act on",
+                "final judgment",
+            }
+            if tail and head.casefold() in generic_heads:
+                tail_limit = 18 if _contains_cjk(text) else 40
+                return f"{head}{separator}{_smart_clip_visible_text(tail, tail_limit)}"
             return head
     candidate = _presentation_clause(text)
     if "…" in candidate:
@@ -2982,41 +3003,12 @@ def _topic_terms(value: str) -> set[str]:
 
 
 def _layout_shapes(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
+    """Render the safe premium layout selected by the canonical page plan.
+
+    The customer-delivery renderer owns text/image separation, while the
+    archetype inside that renderer changes the actual page geometry.
+    """
     return _customer_delivery_layout(slide, blocks, fg, accent, soft)
-    archetype = slide.design_plan.composition_archetype
-    if archetype == "cinematic_hero":
-        return _hero_layout(slide, blocks, fg, accent, soft)
-    if archetype == "editorial_cover":
-        return _editorial_cover_layout(slide, blocks, fg, accent, soft)
-    if archetype == "architectural_cover":
-        return _architectural_cover_layout(slide, blocks, fg, accent, soft)
-    if archetype == "chapter_index":
-        return _chapter_index_layout(slide, blocks, fg, accent, soft)
-    if archetype == "editorial_split":
-        return _two_column_layout(slide, blocks, fg, accent, soft)
-    if archetype == "diagonal_story":
-        return _diagonal_story_layout(slide, blocks, fg, accent, soft)
-    if archetype == "statement_focus":
-        return _statement_focus_layout(slide, blocks, fg, accent, soft)
-    if archetype == "proof_mosaic":
-        return _proof_mosaic_layout(slide, blocks, fg, accent, soft)
-    if archetype == "data_landscape":
-        return _chart_focus_layout(slide, blocks, fg, accent, soft)
-    if archetype == "process_ribbon":
-        return _timeline_layout(slide, blocks, fg, accent, soft)
-    if archetype == "system_map":
-        return _system_map_layout(slide, blocks, fg, accent, soft)
-    if archetype == "split_comparison":
-        return _split_comparison_layout(slide, blocks, fg, accent, soft)
-    if archetype == "priority_stack":
-        return _priority_stack_layout(slide, blocks, fg, accent, soft)
-    if archetype == "manifesto_close":
-        return _manifesto_close_layout(slide, blocks, fg, accent, soft)
-    if archetype == "future_horizon":
-        return _future_horizon_layout(slide, blocks, fg, accent, soft)
-    if archetype == "closing_echo":
-        return _closing_layout(slide, blocks, fg, accent, soft)
-    return _two_column_layout(slide, blocks, fg, accent, soft)
 
 
 def _customer_delivery_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
@@ -3061,7 +3053,7 @@ def _customer_delivery_layout(slide, blocks: list, fg: str, accent: str, soft: s
             for index, block in enumerate(support[:2])
         )
         return "\n".join([title, subtitle, lead_box, lead_text, support_shapes])
-    if purpose in {"agenda", "framework"} or archetype in {"chapter_index", "system_map"}:
+    if purpose == "agenda" or archetype == "chapter_index":
         rows = []
         agenda_items = items[:4] or items[:1]
         for index, block in enumerate(agenda_items):
@@ -3076,7 +3068,25 @@ def _customer_delivery_layout(slide, blocks: list, fg: str, accent: str, soft: s
             )
         spine = _alpha_rect_shape(49, 818000, 1980000, 26000, 2880000, accent, 42000, name="Agenda Vertical Rhythm")
         return "\n".join([title, subtitle, spine, *rows])
-    if purpose in {"evidence", "insight"} or archetype in {"proof_mosaic", "data_landscape", "statement_focus"}:
+    if purpose == "framework" or archetype == "system_map":
+        center = _shape(40, "roundRect", 2180000, 2500000, 2600000, 1050000, "FFFFFF", alpha=95000, line=accent)
+        center_text = _text_shape(41, lead, 2450000, 2810000, 2060000, 390000, _ppt_statement_font_size(lead, compact=True), fg, bold=True, align="ctr")
+        node_positions = [
+            (650000, 1780000, 1500000, 620000),
+            (4900000, 1780000, 1420000, 620000),
+            (650000, 4140000, 1500000, 620000),
+        ]
+        nodes = [
+            _premium_card_shape(42 + index, block.content, x, y, cx, cy, soft, fg, accent)
+            for index, (block, (x, y, cx, cy)) in enumerate(zip(support[:3], node_positions))
+        ]
+        connectors = [
+            _alpha_rect_shape(46, 1780000, 2380000, 1020000, 26000, accent, 52000, name="Framework Connector A"),
+            _alpha_rect_shape(47, 4780000, 2380000, 720000, 26000, accent, 52000, name="Framework Connector B"),
+            _alpha_rect_shape(48, 3220000, 3550000, 26000, 720000, accent, 52000, name="Framework Connector C"),
+        ]
+        return "\n".join([title, subtitle, *connectors, center, center_text, *nodes])
+    if purpose == "evidence" or archetype in {"proof_mosaic", "data_landscape"}:
         statement_panel = _shape(40, "roundRect", 660000, 1640000, 5860000, 1320000, "FFFFFF", alpha=96000, line=accent)
         statement_text = _text_shape(41, lead, 1000000, 1990000, 5180000, 470000, _ppt_statement_font_size(lead), fg, bold=True)
         evidence_line = _alpha_rect_shape(45, 920000, 3460000, 4880000, 32000, accent, 62000, name="Evidence Logic Rail")
@@ -3102,23 +3112,50 @@ def _customer_delivery_layout(slide, blocks: list, fg: str, accent: str, soft: s
                 )
             )
         return "\n".join([title, subtitle, statement_panel, statement_text, evidence_line, *support_shapes])
-    if purpose in {"conclusion", "recommendation"} or archetype in {
-        "manifesto_close",
-        "future_horizon",
-        "closing_echo",
-        "priority_stack",
-    }:
-        lead_box = _shape(50, "roundRect", 680000, 1640000, 5740000, 1340000, "FFFFFF", alpha=96000, line=accent)
-        lead_text = _text_shape(51, lead, 1020000, 1980000, 5060000, 520000, _ppt_statement_font_size(lead), fg, bold=True)
-        support_shapes = []
-        for index, block in enumerate(support[:3]):
-            y = 3380000 + index * 650000
-            width = 5020000 - index * 360000
-            support_shapes.append(
-                _premium_card_shape(52 + index, block.content, 920000 + index * 280000, y, width, 500000, soft, fg, accent)
+    if purpose == "insight" or archetype == "statement_focus":
+        insight_mark = _text_shape(50, "“", 620000, 1350000, 620000, 900000, 4300, accent, bold=True)
+        insight_text = _text_shape(51, lead, 1180000, 1760000, 5000000, 1740000, _ppt_statement_font_size(lead), fg, bold=True)
+        support_shapes = "\n".join(
+            _premium_card_shape(
+                52 + index,
+                block.content,
+                760000 + index * 2820000,
+                4300000,
+                2580000,
+                720000,
+                soft,
+                fg,
+                accent,
             )
+            for index, block in enumerate(support[:2])
+        )
+        insight_line = _alpha_rect_shape(56, 1140000, 3690000, 4300000, 36000, accent, 58000, name="Insight Pause Line")
+        return "\n".join([title, subtitle, insight_mark, insight_text, insight_line, support_shapes])
+    if purpose == "recommendation" or archetype == "priority_stack":
+        lead_box = _shape(60, "roundRect", 660000, 1540000, 5860000, 900000, "FFFFFF", alpha=96000, line=accent)
+        lead_text = _text_shape(61, lead, 980000, 1780000, 5180000, 380000, _ppt_statement_font_size(lead, compact=True), fg, bold=True)
+        card_shapes = []
+        for index, block in enumerate(support[:3]):
+            x = 720000 + index * 300000
+            y = 2980000 + index * 760000
+            width = 5400000 - index * 420000
+            card_shapes.extend(
+                [
+                    _shape(62 + index * 3, "ellipse", x, y + 120000, 260000, 260000, accent, alpha=90000),
+                    _text_shape(63 + index * 3, str(index + 1), x + 72000, y + 190000, 110000, 90000, 840, "FFFFFF", bold=True, align="ctr"),
+                    _premium_card_shape(64 + index * 3, block.content, x + 430000, y, width, 540000, soft, fg, accent),
+                ]
+            )
+        return "\n".join([title, subtitle, lead_box, lead_text, *card_shapes])
+    if purpose == "conclusion" or archetype in {"manifesto_close", "future_horizon", "closing_echo"}:
+        lead_box = _shape(50, "roundRect", 680000, 1640000, 5740000, 1340000, "FFFFFF", alpha=96000, line=accent)
+        lead_text = _text_shape(51, lead, 980000, 1940000, 5140000, 600000, _ppt_statement_font_size(lead), fg, bold=True, align="ctr")
+        support_shapes = "\n".join(
+            _premium_card_shape(52 + index, block.content, 900000 + index * 2700000, 3700000, 2460000, 660000, soft, fg, accent)
+            for index, block in enumerate(support[:2])
+        )
         horizon = _alpha_rect_shape(58, 900000, 5450000, 5120000, 36000, accent, 52000, name="Closing Horizon")
-        return "\n".join([title, subtitle, lead_box, lead_text, *support_shapes, horizon])
+        return "\n".join([title, subtitle, lead_box, lead_text, support_shapes, horizon])
     if archetype in {"process_ribbon", "diagonal_story", "split_comparison"}:
         lead_box = _shape(60, "roundRect", 660000, 1540000, 5860000, 900000, "FFFFFF", alpha=96000, line=accent)
         lead_text = _text_shape(61, lead, 980000, 1780000, 5180000, 380000, _ppt_statement_font_size(lead, compact=True), fg, bold=True)

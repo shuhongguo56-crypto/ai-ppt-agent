@@ -129,7 +129,10 @@ def test_compact_render_block_prefers_complete_chinese_clause_over_half_sentence
 def test_ppt_title_text_uses_section_label_for_long_colon_titles() -> None:
     title = "作用机制：它真正需要解决的不是“多做一次营销”，而是如何把产品创新、数字化运营连成系统"
 
-    assert render_service._ppt_title_text(title) == "作用机制"
+    compact = render_service._ppt_title_text(title)
+    assert compact.startswith("作用机制：")
+    assert "多做一次营销" in compact
+    assert len(compact) < len(title)
 
 
 def test_high_risk_ai_image_prompt_avoids_interface_words() -> None:
@@ -554,6 +557,11 @@ def test_render_creates_pptx_and_hyperframes_from_same_slide_deck(client) -> Non
     assert "Explain how this slide advances" not in slide1
     assert "SECTION 02" not in slide2
     assert "EVIDENCE VIEW" not in slide5
+    assert "Agenda Vertical Rhythm" in slide2
+    assert "Framework Connector" in slide_xml[3]
+    assert "Evidence Logic Rail" in slide5
+    assert "Insight Pause Line" in slide_xml[5]
+    assert "Closing Horizon" in slide_xml[-1]
     assert "CORE MESSAGE" not in slide1
     assert "WHAT TO EXPECT" not in slide1
     assert "MAIN TAKEAWAY" not in slide2

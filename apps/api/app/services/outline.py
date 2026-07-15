@@ -258,6 +258,7 @@ class _SourceProfile:
     excerpts: list[str]
     source_ids: list[str]
     case_sections: dict[str, str]
+    logic_chain: dict[str, str]
 
 
 _TITLE_BY_PURPOSE = {
@@ -440,6 +441,7 @@ def _outline_from_model_payload(
     generation_id: str,
 ) -> OutlineDecision:
     raw_slides = list(payload["slides"])
+    source_profile = _source_profile(source_pack)
     slides: list[dict[str, Any]] = []
     seen_key_points: set[str] = set()
     for index, raw in enumerate(raw_slides, start=1):
@@ -450,10 +452,41 @@ def _outline_from_model_payload(
         elif index == len(raw_slides):
             item["purpose"] = "conclusion"
             item["suggestedLayout"] = "closing"
+        purpose = str(item["purpose"])
+        if source_profile is not None:
+            if _generic_outline_copy(str(item.get("title", "")), purpose=purpose):
+                item["title"] = _source_slide_title(
+                    brief, purpose, source_profile, index
+                )
+            if _generic_outline_copy(str(item.get("keyPoint", "")), purpose=purpose):
+                item["keyPoint"] = _source_slide_key_point(
+                    brief, purpose, source_profile, index
+                )
+            raw_points = item.get("talkingPoints")
+            unique_points = {
+                re.sub(r"\W+", "", str(point)).casefold()
+                for point in raw_points or []
+                if str(point).strip()
+            }
+            if not isinstance(raw_points, list) or len(unique_points) < 2:
+                item["talkingPoints"] = _source_talking_points(
+                    brief, purpose, source_profile, index
+                )
         key_point = str(item["keyPoint"]).strip()
         normalized = key_point.lower()
         if normalized in seen_key_points:
-            key_point = f"{key_point} (slide {index})"
+            key_point = (
+                _source_slide_key_point(brief, purpose, source_profile, index)
+                if source_profile is not None
+                else key_point
+            )
+            if key_point.lower() in seen_key_points:
+                qualifier = str(item["talkingPoints"][0]).strip()
+                separator = "；" if _is_zh(brief) else "; "
+                key_point = _clip_text(
+                    f"{key_point}{separator}{qualifier}",
+                    104 if _is_zh(brief) else 170,
+                )
             normalized = key_point.lower()
         seen_key_points.add(normalized)
         slides.append(
@@ -621,6 +654,24 @@ def _stable_generation_id(payload: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _generic_outline_copy(value: str, *, purpose: str) -> bool:
+    normalized = re.sub(r"[\W_]+", "", value).casefold()
+    if len(normalized) < 5:
+        return True
+    generic_by_purpose = {
+        "cover": {"presentationoverview", "汇报总览", "主题介绍"},
+        "agenda": {"agenda", "roadmap", "corenarrative", "目录", "汇报路径", "主要内容"},
+        "context": {"context", "background", "whythismatters", "背景", "问题背景", "为什么值得关注", "背景与问题边界"},
+        "framework": {"framework", "analyticalframework", "分析框架", "作用机制", "方法框架"},
+        "evidence": {"evidence", "keyevidence", "关键证据", "数据分析", "研究证据"},
+        "insight": {"insight", "coreinsight", "核心洞察", "主要发现"},
+        "recommendation": {"recommendation", "recommendedpath", "行动建议", "落地路径", "策略建议"},
+        "conclusion": {"conclusion", "closingtakeaway", "结论", "总结", "结论与下一步"},
+    }
+    candidates = generic_by_purpose.get(purpose, set())
+    return normalized in {re.sub(r"[\W_]+", "", item).casefold() for item in candidates}
+
+
 def _outline_prompt(
     brief: ProjectBrief,
     source_pack: SourcePack | None,
@@ -650,6 +701,10 @@ def _outline_prompt(
                     "Research and enterprise modes must produce a client-ready PPT storyline, not a shallow school-report outline.",
                     "Tie the whole deck into one rigorous logic chain: problem, mechanism, evidence, implications, and action.",
                     "Each slide title must be a specific judgment or question answer; avoid generic labels unless the wording adds new meaning.",
+                    "Make every page advance the argument with genuinely new information. Never repeat one claim under several renamed headings.",
+                    "For every content page, write a claim, the source-backed support for that claim, and the implication for this audience; keep those roles visible in talkingPoints.",
+                    "Use an intentional page rhythm: alternate anchor pages, dense proof/framework pages, and breathing insight pages instead of repeating card grids.",
+                    "Evidence pages must name the fact, figure, case, or source limitation being shown; never substitute phrases such as 'research shows' for actual evidence.",
                     "Every visualIntent and requiredAssets entry must be useful for a later image/search plan.",
                     "Separate verified source claims from inference; put uncertainty into citationNeeds or risks.",
                 ]
@@ -665,6 +720,7 @@ def _outline_prompt(
                 "Prefer memorable claims, contrast, before/after logic, frameworks, and decision-ready summaries.",
                 "If source material exists, treat SourcePack.summary as a structured reading report. Use its thesis, key arguments, evidence, recommended PPT flow, and excerpts explicitly.",
                 "Never invent evidence outside SourcePack. If the source lacks evidence, say what needs verification in citationNeeds or risks.",
+                "Agenda slides should preview the actual argument, not list generic section names. Conclusion slides must synthesize the evidence and action rather than repeat the cover verbatim.",
                 "Keep text concise enough for professional slides; put elaboration in speaker notes.",
             ],
             "visualPlanningRules": [
@@ -841,6 +897,7 @@ def _source_profile(source_pack: SourcePack | None) -> _SourceProfile | None:
     general_evidence: list[str] = []
     ppt_flow: list[str] = []
     excerpts: list[str] = []
+    logic_chain_values: dict[str, str] = {}
     for item in source_pack.sources:
         summary = item.summary.strip()
         if not summary:
@@ -861,6 +918,10 @@ def _source_profile(source_pack: SourcePack | None) -> _SourceProfile | None:
             key_points.append(source_thesis)
         logic_chain = _logic_chain_profile(summary)
         key_points.extend(logic_chain["points"])
+        for logic_key in ("central", "why", "mechanism", "risk", "action"):
+            logic_value = str(logic_chain.get(logic_key, "")).strip()
+            if logic_value and logic_key not in logic_chain_values:
+                logic_chain_values[logic_key] = logic_value
         source_evidence = _section_items(summary, "重要事实/数据/证据")
         if case_sections.get("evidence"):
             source_evidence.append(case_sections["evidence"])
@@ -906,6 +967,7 @@ def _source_profile(source_pack: SourcePack | None) -> _SourceProfile | None:
         excerpts=[_clip_text(item, 220) for item in excerpts[:5]],
         source_ids=source_ids[:6],
         case_sections=case_sections,
+        logic_chain=logic_chain_values,
     )
 
 
@@ -1145,13 +1207,34 @@ def _case_talking_points(
 def _unique_source_items(items: list[str]) -> list[str]:
     result: list[str] = []
     for item in items:
-        cleaned = " ".join(item.split()).strip()
+        cleaned = _normalize_source_item(item)
         if cleaned and cleaned not in result:
             result.append(cleaned)
     return result
 
 
-def _logic_chain_profile(summary: str) -> dict[str, list[str]]:
+def _normalize_source_item(value: str) -> str:
+    """Remove internal PPT-planning scaffolds from customer-facing source claims."""
+
+    cleaned = " ".join(str(value or "").split()).strip()
+    if not cleaned:
+        return ""
+    quoted_claim = re.search(
+        r"(?:论点页围绕|围绕|聚焦)[“\"](.+?)[”\"](?:展开|组织|呈现|$)",
+        cleaned,
+    )
+    if quoted_claim:
+        return quoted_claim.group(1).strip("。；; ")
+    if cleaned.startswith("背景页解释") and "：" in cleaned:
+        return cleaned.split("：", 1)[1].strip("。；; ")
+    if cleaned.startswith(("封面直接给出主题", "结尾页回到原文主旨")):
+        return ""
+    if cleaned.startswith("原文没有明显数字型证据"):
+        return "当前资料提供方向性判断，但尚缺可直接引用的量化证据。"
+    return cleaned
+
+
+def _logic_chain_profile(summary: str) -> dict[str, Any]:
     value_prefixes = {
         "central": ("Central question:", "中心问题："),
         "why": ("Why now:", "为什么现在："),
@@ -1165,7 +1248,9 @@ def _logic_chain_profile(summary: str) -> dict[str, list[str]]:
         for key, prefixes in value_prefixes.items():
             for prefix in prefixes:
                 if line.startswith(prefix):
-                    values[key] = line[len(prefix) :].strip()
+                    normalized = _normalize_source_item(line[len(prefix) :].strip())
+                    if normalized:
+                        values[key] = normalized
     evidence = []
     for heading in ("Evidence map:", "证据地图："):
         start = next((index for index, line in enumerate(lines) if line == heading), -1)
@@ -1176,7 +1261,9 @@ def _logic_chain_profile(summary: str) -> dict[str, list[str]]:
                 continue
             if not line.startswith(("-", "•", "*")):
                 break
-            evidence.append(line[1:].strip())
+            normalized = _normalize_source_item(line[1:].strip())
+            if normalized:
+                evidence.append(normalized)
     points = [
         item
         for item in [
@@ -1197,7 +1284,12 @@ def _logic_chain_profile(summary: str) -> dict[str, list[str]]:
         ]
         if item
     ]
-    return {"points": points, "evidence": evidence, "flow": flow}
+    return {
+        "points": points,
+        "evidence": evidence,
+        "flow": flow,
+        **values,
+    }
 
 
 def _source_grounded_objective(brief: ProjectBrief, source_profile: _SourceProfile | None) -> str:
@@ -1215,23 +1307,25 @@ def _source_grounded_objective(brief: ProjectBrief, source_profile: _SourceProfi
 
 
 def _source_grounded_narrative(brief: ProjectBrief, source_profile: _SourceProfile) -> list[str]:
+    central = source_profile.logic_chain.get("central") or source_profile.case_sections.get("central_question")
+    mechanism = source_profile.logic_chain.get("mechanism") or _pick(source_profile.ppt_flow, 0, "")
+    action = source_profile.logic_chain.get("action") or source_profile.case_sections.get("recommendation")
     if _is_zh(brief):
         narrative = [
-            f"先用《{_clip_text(source_profile.title, 42)}》的主旨建立全篇判断。",
-            f"再把原文论点拆成听众能跟上的 PPT 节奏：{_clip_text(source_profile.ppt_flow[0], 92)}",
-            "证据页只使用 SourcePack 中提取出的事实、数字、案例或原文摘录，不自行编造。",
-            "最后回到文章真正想说明的问题，形成一个可复述的结论。",
+            f"主张：{_clip_text(source_profile.thesis, 108)}",
+            f"问题：{_clip_text(central or source_profile.key_points[0], 108)}",
+            f"机制：{_clip_text(mechanism, 108)}",
+            "证据：只使用 SourcePack 中提取出的事实、数字、案例或原文摘录，并明确证据边界。",
+            f"行动：{_clip_text(action or source_profile.ppt_flow[-1], 108)}",
         ]
     else:
         narrative = [
-            f"Open with the source thesis from “{_clip_text(source_profile.title, 42)}”.",
-            f"Translate the source structure into presentation rhythm: {_clip_text(source_profile.ppt_flow[0], 96)}",
-            "Use only extracted source claims, facts, data, or quotes as evidence anchors.",
-            "Close by restating what the source is really asking the audience to remember.",
+            f"Claim: {_clip_text(source_profile.thesis, 140)}",
+            f"Question: {_clip_text(central or source_profile.key_points[0], 140)}",
+            f"Mechanism: {_clip_text(mechanism, 140)}",
+            "Evidence: use only extracted claims, facts, data, cases, or quotes and state the evidence boundary.",
+            f"Action: {_clip_text(action or source_profile.ppt_flow[-1], 140)}",
         ]
-    for point in source_profile.key_points[:2]:
-        prefix = "资料论点：" if _is_zh(brief) else "Source argument anchor: "
-        narrative.insert(-1, f"{prefix}{_clip_text(point, 120)}")
     return narrative[:8]
 
 
@@ -1319,6 +1413,80 @@ def _source_title_fragment(value: str, fallback: str, limit: int) -> str:
     return _clip_text(text or fallback, limit)
 
 
+def _source_argument_anchor(
+    source_profile: _SourceProfile,
+    purpose: str,
+    index: int,
+) -> str:
+    """Return the most relevant source claim for this page's actual job."""
+
+    sections = source_profile.case_sections
+    logic = source_profile.logic_chain
+    point = _pick(source_profile.key_points, max(0, index - 3), source_profile.thesis)
+    flow = _pick(source_profile.ppt_flow, max(0, index - 2), point)
+    evidence = _pick(source_profile.evidence, max(0, index - 5), point)
+    mapping = {
+        "cover": source_profile.thesis,
+        "agenda": flow,
+        "context": sections.get("central_question") or logic.get("central") or logic.get("why") or sections.get("background") or point,
+        "framework": logic.get("mechanism") or flow or point,
+        "evidence": sections.get("evidence") or evidence,
+        "insight": sections.get("insight") or point,
+        "recommendation": sections.get("recommendation") or logic.get("action") or flow or point,
+        "conclusion": sections.get("conclusion") or logic.get("action") or sections.get("insight") or source_profile.thesis,
+    }
+    return str(mapping.get(purpose) or point).strip()
+
+
+def _source_support_set(
+    source_profile: _SourceProfile,
+    purpose: str,
+    index: int,
+) -> list[str]:
+    """Build claim-support-implication page copy without generic filler."""
+
+    logic = source_profile.logic_chain
+    sections = source_profile.case_sections
+    anchor = _source_argument_anchor(source_profile, purpose, index)
+    point = _pick(source_profile.key_points, max(0, index - 2), source_profile.thesis)
+    next_point = _pick(source_profile.key_points, max(0, index - 1), point)
+    evidence = _pick(source_profile.evidence, max(0, index - 4), "")
+    next_evidence = _pick(source_profile.evidence, max(0, index - 3), evidence)
+    excerpt = _pick(source_profile.excerpts, max(0, index - 1), "")
+    flow = _pick(source_profile.ppt_flow, max(0, index - 2), point)
+    candidates_by_purpose = {
+        "cover": [source_profile.thesis, sections.get("insight", "") or point],
+        "agenda": [*source_profile.ppt_flow[:4]],
+        "context": [logic.get("why", "") or sections.get("background", ""), anchor, point],
+        "framework": [anchor, point, next_point, flow],
+        "evidence": [evidence, next_evidence, excerpt, logic.get("risk", "")],
+        "insight": [anchor, evidence, logic.get("risk", "") or next_point],
+        "recommendation": [anchor, logic.get("action", ""), next_point, logic.get("risk", "")],
+        "conclusion": [sections.get("conclusion", "") or source_profile.thesis, sections.get("insight", "") or point, logic.get("action", "")],
+    }
+    candidates = candidates_by_purpose.get(purpose, [anchor, point, evidence, excerpt])
+    points: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        raw_candidate = str(candidate or "")
+        cleaned = _clip_text(raw_candidate, 72 if re.search(r"[\u3400-\u9fff]", raw_candidate) else 120).strip()
+        fingerprint = re.sub(r"\W+", "", cleaned).casefold()
+        if cleaned and fingerprint and fingerprint not in seen:
+            points.append(cleaned)
+            seen.add(fingerprint)
+    if len(points) < 2:
+        for candidate in [anchor, point, flow, evidence, excerpt, source_profile.thesis]:
+            raw_candidate = str(candidate or "")
+            cleaned = _clip_text(raw_candidate, 72 if re.search(r"[\u3400-\u9fff]", raw_candidate) else 120).strip()
+            fingerprint = re.sub(r"\W+", "", cleaned).casefold()
+            if cleaned and fingerprint and fingerprint not in seen:
+                points.append(cleaned)
+                seen.add(fingerprint)
+            if len(points) >= 2:
+                break
+    return points[:4]
+
+
 def _is_brand_growth_source(brief: ProjectBrief, source_profile: _SourceProfile) -> bool:
     haystack = " ".join(
         [
@@ -1331,11 +1499,10 @@ def _is_brand_growth_source(brief: ProjectBrief, source_profile: _SourceProfile)
             *source_profile.ppt_flow,
         ]
     ).lower()
-    brand_markers = (
+    case_specific_markers = (
         "瑞幸",
         "咖啡",
         "luckin",
-        "品牌",
         "新消费",
         "门店",
         "会员",
@@ -1343,13 +1510,14 @@ def _is_brand_growth_source(brief: ProjectBrief, source_profile: _SourceProfile)
         "供应链",
         "联名",
         "爆品",
-        "增长",
-        "brand",
         "retail",
         "store",
-        "consumer",
     )
-    return sum(1 for marker in brand_markers if marker in haystack) >= 3
+    growth_markers = ("品牌", "增长", "用户运营", "brand", "growth", "consumer")
+    specific_hits = sum(1 for marker in case_specific_markers if marker in haystack)
+    growth_hits = sum(1 for marker in growth_markers if marker in haystack)
+    named_case = any(marker in haystack for marker in ("瑞幸", "luckin"))
+    return named_case or (specific_hits >= 2 and growth_hits >= 1)
 
 
 def _brand_growth_title(
@@ -1489,6 +1657,202 @@ def _is_auto_research_profile(source_profile: _SourceProfile) -> bool:
     )
 
 
+def _distinct_source_claims(source_profile: _SourceProfile) -> list[str]:
+    candidates = [
+        *source_profile.key_points,
+        source_profile.logic_chain.get("why", ""),
+        source_profile.case_sections.get("background", ""),
+        source_profile.logic_chain.get("mechanism", ""),
+        source_profile.case_sections.get("insight", ""),
+        source_profile.thesis,
+    ]
+    claims: list[str] = []
+    fingerprints: list[str] = []
+    for candidate in candidates:
+        cleaned = _normalize_source_item(candidate)
+        fingerprint = re.sub(r"[^0-9a-z㐀-鿿]+", "", cleaned.casefold())
+        if not fingerprint:
+            continue
+        if any(
+            fingerprint == existing
+            or (len(fingerprint) >= 12 and fingerprint in existing)
+            or (len(existing) >= 12 and existing in fingerprint)
+            for existing in fingerprints
+        ):
+            continue
+        claims.append(cleaned)
+        fingerprints.append(fingerprint)
+    return claims
+
+
+def _is_business_strategy_source(brief: ProjectBrief, source_profile: _SourceProfile) -> bool:
+    haystack = " ".join(
+        [
+            brief.topic,
+            brief.audience,
+            source_profile.thesis,
+            *source_profile.key_points,
+        ]
+    ).casefold()
+    terms = (
+        "企业",
+        "行业",
+        "市场",
+        "竞争",
+        "品牌",
+        "增长",
+        "利润",
+        "用户",
+        "客户",
+        "渠道",
+        "成本",
+        "business",
+        "market",
+        "growth",
+        "brand",
+        "customer",
+    )
+    return sum(term in haystack for term in terms) >= 3
+
+
+def _business_story_parts(source_profile: _SourceProfile) -> tuple[str, str, str]:
+    claims = _distinct_source_claims(source_profile)
+    thesis = source_profile.thesis
+    non_thesis = [claim for claim in claims if claim != thesis]
+    context = _pick(non_thesis, 0, thesis)
+    customer = next(
+        (
+            claim
+            for claim in non_thesis[1:]
+            if re.search(r"用户|客户|消费者|决策|需求|体验|customer|consumer|decision", claim, re.IGNORECASE)
+        ),
+        _pick(non_thesis, 1, context),
+    )
+    return context, customer, thesis
+
+
+def _business_source_title(purpose: str, source_profile: _SourceProfile, index: int) -> str:
+    context, customer, thesis = _business_story_parts(source_profile)
+    context_text = f"{context} {customer} {thesis}"
+    evidence_text = " ".join(source_profile.evidence)
+    evidence_is_boundary = any(
+        marker in evidence_text
+        for marker in ("尚缺", "待补", "需补", "需要交付前", "to verify", "needed before")
+    )
+    mapping = {
+        "agenda": "从外部变化到战略选择",
+        "context": (
+            "竞争规则：补贴退场，能力上桌"
+            if "补贴" in context_text
+            else "外部规则正在改变"
+        ),
+        "framework": (
+            "用户决策：长期价值正在上桌"
+            if re.search(r"用户|客户|消费者|决策|全生命周期", customer)
+            else "价值选择标准正在改变"
+        ),
+        "evidence": (
+            "证据交叉验证：趋势是否成立"
+            if source_profile.evidence and not evidence_is_boundary
+            else "证据边界：方向已清，数据待补"
+        ),
+        "insight": "增长逻辑：规模不再自动等于优势",
+        "recommendation": (
+            "验收机制：把战略变成指标"
+            if index > 6
+            else (
+                "三项优先级：利润、心智、效率"
+                if all(term in thesis for term in ("利润", "心智", "效率"))
+                else "把战略判断变成经营优先级"
+            )
+        ),
+        "conclusion": "最终判断：下一阶段比拼增长质量",
+    }
+    return mapping[purpose]
+
+
+def _business_source_key_point(
+    purpose: str,
+    source_profile: _SourceProfile,
+    index: int,
+) -> str:
+    context, customer, thesis = _business_story_parts(source_profile)
+    context = context.rstrip("。；; ")
+    customer = customer.rstrip("。；; ")
+    thesis = thesis.rstrip("。；; ")
+    evidence = _pick(source_profile.evidence, 0, "")
+    mapping = {
+        "agenda": "叙事路径：先看竞争规则如何变化，再拆用户决策标准，最后把结论转成经营优先级。",
+        "context": f"外部变化：{context}",
+        "framework": f"需求机制：{customer}",
+        "evidence": (
+            f"证据：{evidence}"
+            if evidence
+            else "证据边界：现有资料形成了‘外部竞争变化—用户标准变化—企业战略重构’的一致方向，但尚缺可直接引用的量化指标。"
+        ),
+        "insight": (
+            f"综合判断：{_clip_text(context, 44)}；同时，{_clip_text(customer, 44)}。"
+            "因此，只靠规模扩张难以形成下一阶段优势。"
+        ),
+        "recommendation": (
+            "验收：用利润质量、品牌心智、组织效率与用户价值四组指标，检查战略转向是否真正发生。"
+            if index > 6
+            else (
+                f"行动：把‘{_clip_text(thesis, 64)}’拆成可追踪的经营优先级，"
+                "并逐项对应资料中的竞争维度与用户决策标准。"
+            )
+        ),
+        "conclusion": (
+            "结论：下一阶段优势不只取决于做大规模，更取决于能否落实‘"
+            f"{_clip_text(thesis, 66)}’。"
+        ),
+    }
+    return mapping[purpose]
+
+
+def _business_source_talking_points(
+    purpose: str,
+    source_profile: _SourceProfile,
+    index: int,
+) -> list[str]:
+    context, customer, thesis = _business_story_parts(source_profile)
+    evidence = _pick(source_profile.evidence, 0, "")
+    mapping = {
+        "agenda": [
+            "外部竞争维度发生了什么变化？",
+            "用户正在用什么标准重新选择？",
+            "企业应该把哪些能力放到同一套增长模型中？",
+        ],
+        "context": [context, "竞争焦点正在从单一红利转向产品、成本、渠道与组织的系统能力。"],
+        "framework": [customer, "用户标准变化，会反向重塑产品承诺、体验可信度与经营效率。"],
+        "evidence": [
+            evidence or context,
+            customer,
+            "量化结论需继续补充行业、用户与经营结果数据后再对外引用。",
+        ],
+        "insight": [context, customer, "规模增长只有与利润、心智和效率同步，才能沉淀为长期优势。"],
+        "recommendation": (
+            [
+                "利润质量：增长是否伴随可持续盈利改善。",
+                "品牌心智：用户是否形成稳定、可复述的选择理由。",
+                "组织效率：产品、渠道与履约能否协同兑现承诺。",
+                "用户价值：补能、可信度与全生命周期成本是否改善。",
+            ]
+            if index > 6
+            else [
+                thesis,
+                "把外部竞争维度转成内部经营指标。",
+                "把用户决策标准转成产品与服务验收条件。",
+            ]
+        ),
+        "conclusion": [
+            "下一阶段竞争的分水岭是增长质量，而不是规模数字本身。",
+            thesis,
+        ],
+    }
+    return mapping[purpose]
+
+
 def _source_slide_title(
     brief: ProjectBrief,
     purpose: str,
@@ -1498,6 +1862,7 @@ def _source_slide_title(
     topic_label = _source_title_topic(brief, source_profile)
     point = _pick(source_profile.key_points, index - 3, source_profile.thesis)
     evidence = _pick(source_profile.evidence, index - 5, point)
+    anchor = _source_argument_anchor(source_profile, purpose, index)
     if _is_zh(brief):
         if _is_auto_research_profile(source_profile) and _is_ai_education_topic(
             f"{topic_label} {brief.audience} {source_profile.thesis}"
@@ -1516,40 +1881,37 @@ def _source_slide_title(
             return _case_slide_title(brief, purpose, source_profile)
         elif _is_brand_growth_source(brief, source_profile):
             return _brand_growth_title(brief, purpose, index, source_profile)
-        elif _is_auto_research_profile(source_profile):
-            mapping = {
-                "cover": topic_label,
-                "agenda": "汇报路径",
-                "context": "背景与问题边界",
-                "framework": "作用机制与应用边界",
-                "evidence": "公开资料与研究证据",
-                "insight": "核心洞察：机会与风险并存",
-                "recommendation": "落地路径",
-                "conclusion": "结论与下一步",
-            }
+        elif purpose != "cover" and _is_business_strategy_source(brief, source_profile):
+            return _business_source_title(purpose, source_profile, index)
         else:
-            point_label = _source_title_fragment(point, "核心机制", 18)
+            point_label = _source_title_fragment(anchor or point, "核心机制", 18)
             evidence_label = _source_title_fragment(evidence, "关键证据", 18)
+            evidence_title = (
+                "公开资料与研究证据"
+                if _is_auto_research_profile(source_profile)
+                and not re.search(r"[\u3400-\u9fff]", evidence)
+                else f"证据指向：{evidence_label}"
+            )
             mapping = {
                 "cover": topic_label,
-                "agenda": "汇报路径",
-                "context": "背景与问题边界",
+                "agenda": "从问题到行动：论证路径",
+                "context": f"问题边界：{point_label}",
                 "framework": f"作用机制：{point_label}",
-                "evidence": f"关键证据：{evidence_label}",
-                "insight": _source_title_fragment(point, "关键洞察", 20),
-                "recommendation": "落地路径",
-                "conclusion": "结论与下一步",
+                "evidence": evidence_title,
+                "insight": f"因此：{_source_title_fragment(anchor, '关键洞察', 20)}",
+                "recommendation": f"行动优先级：{_source_title_fragment(anchor, '落地路径', 18)}",
+                "conclusion": f"最终判断：{_source_title_fragment(anchor, '下一步', 20)}",
             }
     else:
         mapping = {
             "cover": topic_label,
-            "agenda": "Core narrative",
-            "context": "Why this matters now",
-            "framework": f"How it works: {_source_title_fragment(point, 'mechanism', 34)}",
+            "agenda": "From question to action",
+            "context": f"The real issue: {_source_title_fragment(anchor, 'why this matters', 34)}",
+            "framework": f"How it works: {_source_title_fragment(anchor, 'mechanism', 34)}",
             "evidence": f"Evidence map: {_source_title_fragment(evidence, 'proof', 34)}",
-            "insight": _source_title_fragment(point, "Core insight", 42),
-            "recommendation": "Path to action",
-            "conclusion": "Conclusion and next step",
+            "insight": f"What this means: {_source_title_fragment(anchor, 'core insight', 34)}",
+            "recommendation": f"Act on: {_source_title_fragment(anchor, 'priority', 34)}",
+            "conclusion": f"Final judgment: {_source_title_fragment(anchor, 'next step', 34)}",
         }
     return _clip_text(mapping[purpose], 110)
 
@@ -1563,6 +1925,12 @@ def _source_slide_key_point(
     point = _pick(source_profile.key_points, index - 3, source_profile.thesis)
     evidence = _pick(source_profile.evidence, index - 5, point)
     flow = _pick(source_profile.ppt_flow, index - 2, point)
+    anchor = _source_argument_anchor(source_profile, purpose, index)
+    evidence_copy = (
+        evidence
+        if not _is_zh(brief) or re.search(r"[\u3400-\u9fff]", evidence)
+        else point
+    )
     if _is_zh(brief):
         if _is_auto_research_profile(source_profile) and _is_ai_education_topic(
             f"{source_profile.title} {brief.audience} {source_profile.thesis}"
@@ -1585,26 +1953,28 @@ def _source_slide_key_point(
             return _case_slide_key_point(brief, purpose, source_profile)
         if _is_brand_growth_source(brief, source_profile):
             return _brand_growth_key_point(brief, purpose, index, source_profile)
+        if purpose != "cover" and _is_business_strategy_source(brief, source_profile):
+            return _clip_text(_business_source_key_point(purpose, source_profile, index), 132)
         mapping = {
             "cover": f"核心判断：{source_profile.thesis}",
-            "agenda": f"叙事路径：{flow}",
-            "context": f"背景：{point}",
-            "framework": f"机制：{flow}",
-            "evidence": f"证据：{evidence}",
-            "insight": f"洞察：{point}",
-            "recommendation": f"行动：{_clip_text(point, 64)}；再转化为{brief.audience}能执行的判断。",
-            "conclusion": f"结论：{source_profile.thesis}",
+            "agenda": "叙事路径：先界定核心问题，再解释作用机制与证据，最后收束为面向受众的行动。",
+            "context": f"问题：{anchor}",
+            "framework": f"机制：{anchor}",
+            "evidence": f"证据：{evidence_copy}",
+            "insight": f"洞察：{anchor}",
+            "recommendation": f"行动：{anchor}",
+            "conclusion": f"结论：{anchor}",
         }
     else:
         mapping = {
             "cover": f"Core claim: {source_profile.thesis}",
-            "agenda": f"Narrative path: {flow}",
-            "context": f"Context: {point}",
-            "framework": f"Mechanism: {flow}",
+            "agenda": "Narrative path: define the question, explain the mechanism and evidence, then turn the conclusion into action.",
+            "context": f"Question: {anchor}",
+            "framework": f"Mechanism: {anchor}",
             "evidence": f"Evidence: {evidence}",
-            "insight": f"Insight: {point}",
-            "recommendation": f"Action: turn {_clip_text(point, 84)} into an executable judgment for {brief.audience}.",
-            "conclusion": f"Conclusion: {source_profile.thesis}",
+            "insight": f"Insight: {anchor}",
+            "recommendation": f"Action for {brief.audience}: {anchor}",
+            "conclusion": f"Conclusion: {anchor}",
         }
     selected = mapping[purpose]
     if purpose == "recommendation" and index > 6:
@@ -1672,17 +2042,9 @@ def _source_talking_points(
         return _case_talking_points(purpose, source_profile)
     if _is_zh(brief) and _is_brand_growth_source(brief, source_profile):
         return _brand_growth_talking_points(purpose, index)
-    point = _pick(source_profile.key_points, index - 3, source_profile.thesis)
-    evidence = _pick(source_profile.evidence, index - 5, "")
-    excerpt = _pick(source_profile.excerpts, index - 1, point)
-    flow = _pick(source_profile.ppt_flow, index - 2, point)
-    candidates = [point, flow, evidence, excerpt]
-    points: list[str] = []
-    for candidate in candidates:
-        cleaned = _clip_text(candidate, 72 if _is_zh(brief) else 120).strip()
-        if cleaned and cleaned not in points:
-            points.append(cleaned)
-    return points[:4]
+    if _is_zh(brief) and purpose != "cover" and _is_business_strategy_source(brief, source_profile):
+        return _business_source_talking_points(purpose, source_profile, index)
+    return _source_support_set(source_profile, purpose, index)
 
 
 def _source_speaker_notes(

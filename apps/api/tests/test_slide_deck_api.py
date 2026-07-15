@@ -160,9 +160,17 @@ def test_assemble_slide_deck_from_confirmed_outline_and_visual_direction(client)
         assert deck_slide["title"] == outline_slide["title"]
     archetypes = [plan["compositionArchetype"] for plan in plans]
     treatments = [plan["imageTreatment"] for plan in plans]
+    variants = [plan["compositionVariant"] for plan in plans]
+    signatures = set(zip(archetypes, treatments, variants))
     assert all(left != right for left, right in zip(archetypes, archetypes[1:]))
     assert len(set(archetypes)) >= 3
     assert len(set(treatments)) >= 2
+    assert len(signatures) == len(plans)
+    assert {variant.split("-", 1)[0] for variant in variants} == {
+        "anchor",
+        "dense",
+        "breathing",
+    }
     assert plans[0]["compositionArchetype"] in {
         "cinematic_hero",
         "editorial_cover",

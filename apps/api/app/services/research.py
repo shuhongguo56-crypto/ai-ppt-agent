@@ -670,7 +670,10 @@ def _is_relevant_result(query: str, title: str, extract: str) -> bool:
 
 def _requires_strict_relevance(query: str) -> bool:
     normalized = query.lower()
-    return any(term in query for term in ("瑞幸", "瑞幸咖啡")) or "luckin" in normalized
+    if any(term in query for term in ("瑞幸", "瑞幸咖啡")) or "luckin" in normalized:
+        return True
+    cjk = re.sub(r"[^㐀-鿿]", "", query)
+    return len(cjk) >= 6
 
 
 def _query_relevance_terms(query: str) -> list[str]:
@@ -959,24 +962,24 @@ def _local_fallback_profile(topic: str, audience: str, language: str) -> dict[st
 
 def _is_brand_retail_topic(value: str) -> bool:
     normalized = value.lower()
-    brand_terms = (
-        "瑞幸",
+    if "瑞幸" in normalized or "luckin" in normalized:
+        return True
+    retail_terms = (
         "咖啡",
-        "品牌",
         "门店",
         "零售",
         "新消费",
         "连锁",
         "复购",
-        "luckin",
         "coffee",
-        "brand",
         "retail",
         "store",
         "chain",
-        "consumer",
     )
-    return any(term in normalized for term in brand_terms)
+    growth_terms = ("品牌", "增长", "消费", "brand", "growth", "consumer")
+    return sum(term in normalized for term in retail_terms) >= 2 and any(
+        term in normalized for term in growth_terms
+    )
 
 
 def _research_gap_source(
