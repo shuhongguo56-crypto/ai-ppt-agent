@@ -87,6 +87,26 @@ def test_render_reuses_image_agent_resolved_assets_when_provider_is_unavailable(
     assert 'data-source-type="local_svg_fallback"' not in html
 
 
+def test_image_agent_background_job_can_be_polled(client) -> None:
+    deck = create_slide_deck(client)
+
+    started = client.post(
+        "/api/projects/project-image-agent/image-agent/resolve",
+        json={"slideDeckVersion": deck["version"], "mode": "generate", "background": True},
+    )
+
+    assert started.status_code == 202
+    job_id = started.json()["jobId"]
+    job = client.get(f"/api/projects/project-image-agent/image-agent/jobs/{job_id}")
+    assert job.status_code == 200
+    assert job.json()["status"] == "completed"
+    assert len(job.json()["imageAssets"]) == len(deck["slideDeck"]["slides"])
+
+    missing = client.get("/api/projects/project-image-agent/image-agent/jobs/missing")
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "image_job_not_found"
+
+
 def test_image_agent_requires_current_confirmed_slide_deck(client) -> None:
     assert client.post("/api/projects", json=PROJECT).status_code == 201
 

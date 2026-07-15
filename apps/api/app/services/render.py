@@ -7,6 +7,7 @@ import os
 import re
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from urllib import parse, request as urlrequest
@@ -150,49 +151,39 @@ def resolve_visual_assets(
     assets: dict[int, VisualAsset] = {}
     seen_image_hashes: set[str] = set()
     image_plan_by_slide = {item.slide: item for item in deck.image_plan}
+    candidate_assets: dict[int, VisualAsset | None] = {}
+
+    def resolve_candidate(slide) -> tuple[int, VisualAsset | None]:
+        image_item = image_plan_by_slide[slide.slide_index]
+        asset = _resolve_visual_asset_candidate(
+            slide,
+            image_item,
+            deck,
+            assets_dir,
+            image_gateway,
+            mode=mode,
+            image_search_enabled=image_search_enabled,
+            image_search_timeout_seconds=image_search_timeout_seconds,
+        )
+        return slide.slide_index, asset
+
+    worker_count = _image_resolution_worker_count(len(deck.slides))
+    if worker_count == 1:
+        for slide in deck.slides:
+            slide_index, asset = resolve_candidate(slide)
+            candidate_assets[slide_index] = asset
+    else:
+        # Searching and generating are network-bound and each slide writes to a
+        # distinct file. Resolve the first candidate concurrently, then apply
+        # the deterministic cross-slide uniqueness gate in slide order below.
+        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="ppt-image") as executor:
+            for slide_index, asset in executor.map(resolve_candidate, deck.slides):
+                candidate_assets[slide_index] = asset
+
     for slide in deck.slides:
         image_item = image_plan_by_slide[slide.slide_index]
         query = image_item.search_query
-        asset = None
-        if mode != "generate":
-            asset = _read_cached_visual_asset(
-                slide.slide_index,
-                assets_dir,
-                image_type=image_item.image_type,
-                purpose=image_item.purpose,
-                prompt=image_item.prompt,
-                provider_chain=list(image_item.provider_chain),
-            )
-        if mode != "generate":
-            asset = asset or _search_open_visual_asset(
-                    slide.slide_index,
-                    query,
-                    assets_dir,
-                    image_type=image_item.image_type,
-                    purpose=image_item.purpose,
-                    prompt=image_item.prompt,
-                    provider_chain=list(image_item.provider_chain),
-                    enabled=image_search_enabled,
-                    timeout_seconds=image_search_timeout_seconds,
-                )
-        if asset is None:
-            asset = _generate_visual_asset_with_ai(
-                slide.slide_index,
-                query,
-                assets_dir,
-                image_gateway,
-                image_type=image_item.image_type,
-                purpose=image_item.purpose,
-                image_prompt=image_item.prompt,
-                provider_chain=list(image_item.provider_chain),
-                slide_title=slide.title,
-                slide_intent=slide.visual_intent,
-                asset_role=slide.design_plan.asset_role,
-                image_treatment=slide.design_plan.image_treatment,
-                composition_archetype=slide.design_plan.composition_archetype,
-                direction_name=deck.theme.name,
-                palette=deck.theme.palette,
-            )
+        asset = candidate_assets.get(slide.slide_index)
         if asset is not None and _visual_asset_hash(asset.path) in seen_image_hashes:
             # A searched or generated image can be returned for multiple pages by an
             # upstream provider. Retry with an explicit page-specific variation, and
@@ -245,6 +236,72 @@ def resolve_visual_assets(
         seen_image_hashes.add(_visual_asset_hash(asset.path))
         assets[slide.slide_index] = asset
     return assets
+
+
+def _resolve_visual_asset_candidate(
+    slide,
+    image_item,
+    deck: SlideDeck,
+    assets_dir: Path,
+    image_gateway: ImageGateway | None,
+    *,
+    mode: str,
+    image_search_enabled: bool,
+    image_search_timeout_seconds: float | None,
+) -> VisualAsset | None:
+    query = image_item.search_query
+    asset = None
+    if mode != "generate":
+        asset = _read_cached_visual_asset(
+            slide.slide_index,
+            assets_dir,
+            image_type=image_item.image_type,
+            purpose=image_item.purpose,
+            prompt=image_item.prompt,
+            provider_chain=list(image_item.provider_chain),
+        )
+    if asset is None and mode != "generate":
+        asset = _search_open_visual_asset(
+            slide.slide_index,
+            query,
+            assets_dir,
+            image_type=image_item.image_type,
+            purpose=image_item.purpose,
+            prompt=image_item.prompt,
+            provider_chain=list(image_item.provider_chain),
+            enabled=image_search_enabled,
+            timeout_seconds=image_search_timeout_seconds,
+        )
+    if asset is None:
+        asset = _generate_visual_asset_with_ai(
+            slide.slide_index,
+            query,
+            assets_dir,
+            image_gateway,
+            image_type=image_item.image_type,
+            purpose=image_item.purpose,
+            image_prompt=image_item.prompt,
+            provider_chain=list(image_item.provider_chain),
+            slide_title=slide.title,
+            slide_intent=slide.visual_intent,
+            asset_role=slide.design_plan.asset_role,
+            image_treatment=slide.design_plan.image_treatment,
+            composition_archetype=slide.design_plan.composition_archetype,
+            direction_name=deck.theme.name,
+            palette=deck.theme.palette,
+        )
+    return asset
+
+
+def _image_resolution_worker_count(slide_count: int) -> int:
+    if slide_count <= 2:
+        return 1
+    raw = os.getenv("AI_PPT_IMAGE_RESOLUTION_WORKERS", "4")
+    try:
+        requested = int(raw)
+    except ValueError:
+        requested = 4
+    return max(1, min(requested, slide_count, 6))
 
 
 def _visual_asset_hash(path: Path) -> str:

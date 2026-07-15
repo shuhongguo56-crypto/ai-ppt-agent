@@ -211,6 +211,16 @@ type ImageAgentResolveResponse = {
   imageAssets: ImageAssetResolution[];
 };
 
+type ImageAgentJobResponse = {
+  jobId: string;
+  projectId: string;
+  slideDeckVersion: number;
+  mode: "auto" | "web_first" | "generate";
+  status: "queued" | "running" | "completed" | "failed";
+  imageAssets?: ImageAssetResolution[];
+  error?: string;
+};
+
 type SlideDeckRepairResponse = {
   version: number;
   slideDeck: SlideDeck;
@@ -390,6 +400,36 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(text || `请求失败：${response.status}`);
   }
   return (await response.json()) as T;
+}
+
+async function resolveProjectImages(
+  projectId: string,
+  slideDeckVersion: number,
+  mode: "auto" | "generate",
+): Promise<ImageAgentResolveResponse> {
+  const started = await request<ImageAgentJobResponse>(`/projects/${projectId}/image-agent/resolve`, {
+    method: "POST",
+    body: JSON.stringify({ slideDeckVersion, mode, background: true }),
+  });
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    const job =
+      attempt === 0
+        ? started
+        : await request<ImageAgentJobResponse>(`/projects/${projectId}/image-agent/jobs/${started.jobId}`);
+    if (job.status === "completed" && job.imageAssets) {
+      return {
+        projectId,
+        slideDeckVersion,
+        mode,
+        imageAssets: job.imageAssets,
+      };
+    }
+    if (job.status === "failed") {
+      throw new Error(job.error || "Image Agent failed. Please retry.");
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 2000));
+  }
+  throw new Error("Image Agent is still running. Please retry from the project library later.");
 }
 
 function secondsSince(start: number) {
@@ -1096,10 +1136,7 @@ export default function WorkflowClient() {
       );
 
       const resolvedImages = await step("Image Agent", "先联网搜图；搜不到时调用已配置的生图 provider，并保留本地视觉兜底", () =>
-        request<ImageAgentResolveResponse>(`/projects/${state.projectId}/image-agent/resolve`, {
-          method: "POST",
-          body: JSON.stringify({ slideDeckVersion: deck.version, mode: "auto" }),
-        }),
+        resolveProjectImages(state.projectId!, deck.version, "auto"),
       );
       push("Image Agent", imageSourceSummary(resolvedImages.imageAssets));
 
@@ -1182,10 +1219,7 @@ export default function WorkflowClient() {
         "Image Agent",
         mode === "generate" ? "一键调用生图 provider 重新生成每页视觉资产" : "重新联网搜图并刷新每页视觉资产",
         () =>
-          request<ImageAgentResolveResponse>(`/projects/${state.projectId}/image-agent/resolve`, {
-            method: "POST",
-            body: JSON.stringify({ slideDeckVersion: state.slideDeckVersion, mode }),
-          }),
+          resolveProjectImages(state.projectId!, state.slideDeckVersion!, mode),
       );
       push("Image Agent", imageSourceSummary(resolvedImages.imageAssets));
       const rendered = await step("重新渲染", "用新的图片资产刷新 PPTX 与 HyperFrames HTML", () =>
@@ -1272,10 +1306,7 @@ export default function WorkflowClient() {
           "Image Agent",
           repairPass === 1 ? "按新页面意图重新联网搜图" : "第二轮改用生图链路补齐视觉资产",
           () =>
-            request<ImageAgentResolveResponse>(`/projects/${state.projectId}/image-agent/resolve`, {
-              method: "POST",
-              body: JSON.stringify({ slideDeckVersion: deckVersion, mode: imageMode }),
-            }),
+            resolveProjectImages(state.projectId!, deckVersion, imageMode),
         );
         finalImages = resolvedImages.imageAssets;
         push("Image Agent", imageSourceSummary(resolvedImages.imageAssets));

@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from threading import Lock
 import os
 from typing import Any
 
@@ -290,6 +291,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.repository = repository
     app.state.text_gateway = _build_text_gateway(resolved)
     app.state.image_gateway = _build_image_gateway(resolved)
+    app.state.image_jobs = {}
+    app.state.image_jobs_lock = Lock()
     if resolved.allowed_origins:
         app.add_middleware(
             CORSMiddleware,

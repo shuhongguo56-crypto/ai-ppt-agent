@@ -1,4 +1,6 @@
 import re
+import threading
+import time
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -847,6 +849,76 @@ def test_visual_asset_resolution_retries_until_replacement_is_unique(tmp_path) -
         assets[2].path
     )
     assert "Unique visual alternative 2 for slide 2" in gateway.requests[-1].prompt
+
+
+def test_visual_asset_resolution_runs_first_candidates_concurrently(tmp_path) -> None:
+    class SlowImageGateway:
+        def __init__(self) -> None:
+            self.lock = threading.Lock()
+            self.active = 0
+            self.max_active = 0
+            self.counter = 0
+
+        def generate(self, request):
+            with self.lock:
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+            try:
+                time.sleep(0.05)
+                with self.lock:
+                    self.counter += 1
+                    counter = self.counter
+                return GeneratedImage(
+                    bytes=b"\xff\xd8\xff\xe0" + f"page-specific-{counter}".encode(),
+                    mime_type="image/jpeg",
+                    width=request.width,
+                    height=request.height,
+                    model="gpt-image-2",
+                )
+            finally:
+                with self.lock:
+                    self.active -= 1
+
+    def slide(slide_index: int):
+        return SimpleNamespace(
+            slide_index=slide_index,
+            title=f"Slide {slide_index}",
+            visual_intent=f"Explain page-specific idea {slide_index}",
+            design_plan=SimpleNamespace(
+                asset_role="hero",
+                image_treatment="masked_window",
+                composition_archetype="editorial_cover",
+            ),
+        )
+
+    def image_plan(slide_index: int):
+        return SimpleNamespace(
+            slide=slide_index,
+            search_query=f"page-specific search {slide_index}",
+            image_type="business_scene",
+            purpose=f"Explain slide {slide_index}",
+            prompt=f"Page-specific visual {slide_index}",
+            provider_chain=["OpenAI Image API"],
+        )
+
+    deck = SimpleNamespace(
+        slides=[slide(index) for index in range(1, 5)],
+        image_plan=[image_plan(index) for index in range(1, 5)],
+        theme=SimpleNamespace(name="Enterprise Editorial", palette=["#111111", "#F2BF4A"]),
+    )
+    gateway = SlowImageGateway()
+
+    assets = render_service.resolve_visual_assets(
+        deck,
+        tmp_path,
+        gateway,
+        mode="generate",
+        image_search_enabled=False,
+    )
+
+    assert gateway.max_active >= 2
+    assert len(assets) == 4
+    assert len({render_service._visual_asset_hash(asset.path) for asset in assets.values()}) == 4
 
 
 def test_render_requires_confirmed_slide_deck_and_fresh_version(client) -> None:
