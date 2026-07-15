@@ -6,6 +6,7 @@
     "node": ">=22.13.0"
   },
   "scripts": {
+    "build": "pnpm --filter @ai-ppt/web build",
     "test:python": "python -m pytest -q",
     "test:web": "pnpm --filter @ai-ppt/web typecheck",
     "test": "pnpm test:python && pnpm test:web",
