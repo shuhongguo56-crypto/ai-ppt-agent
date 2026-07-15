@@ -6,7 +6,7 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "build": "npm --prefix apps/web run build && node scripts/export-site.mjs",
+    "build": "npm --prefix apps/web run build:sites && node scripts/export-site.mjs",
     "test:python": "python -m pytest -q",
     "test:web": "pnpm --filter @ai-ppt/web typecheck",
     "test": "pnpm test:python && pnpm test:web",
