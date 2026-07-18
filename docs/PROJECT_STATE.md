@@ -650,3 +650,15 @@ Completed on 2026-07-19:
 - Final regression: 364 Python tests passed; the Next.js typecheck and production/static build passed.
 - Delivery-package inspection confirmed 8 slides, 8 distinct embedded media files, SimSun for Chinese, Times New Roman for English, valid slideshow properties, and no visible ellipsis or replacement characters in slide text.
 - The final 8-page PowerPoint contact sheet is `D:\Codex\Outputs\ai-ppt-customer-delivery-20260719-004251\powerpoint-contact-sheet.jpg`.
+
+## Semantic title fitting and final-artifact completeness gate
+
+Completed on 2026-07-19:
+
+- Long Chinese and English slide titles are condensed at semantic separators or word boundaries before entering the canonical SlideDeck; normal short user-edited titles remain unchanged.
+- PPTX and HyperFrames use the same title condensation rule. Renderer clipping no longer appends visible ellipses or reserves a character for one.
+- The visible-text fitter removes dangling English connector words while preserving complete Chinese terms such as “战略转向”.
+- Quality now unpacks the final PPTX and reads the final HyperFrames HTML. Any visible phrase ending in `…` or `...` fails `pptx_visible_copy_completeness` or `html_visible_copy_completeness`.
+- Both completeness checks are required by customer-delivery readiness and the research/enterprise baseline, closing the gap where JSON-level checks passed while slideshow copy still looked truncated.
+- Competition copy density now rejects canonical titles that carry a truncation marker or exceed the practical 30-CJK/62-Latin title budget.
+- Verification: 367 Python tests passed, including final-artifact truncation detection, semantic bilingual title condensation, repaired-deck behavior, and the full render/quality suite.

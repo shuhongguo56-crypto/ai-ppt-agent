@@ -102,6 +102,7 @@ def test_quality_check_passes_for_rendered_artifacts(client) -> None:
         "pptx_foreground_bounds",
         "pptx_text_fit_estimate",
         "pptx_visible_copy_hygiene",
+        "pptx_visible_copy_completeness",
         "pptx_text_encoding_integrity",
         "html_frame_count",
         "html_visual_assets",
@@ -114,6 +115,7 @@ def test_quality_check_passes_for_rendered_artifacts(client) -> None:
         "html_explainer_layers",
         "html_explanation_mode_diversity",
         "html_visible_copy_hygiene",
+        "html_visible_copy_completeness",
         "html_text_encoding_integrity",
         "competition_story_arc",
         "competition_copy_density",
@@ -126,6 +128,20 @@ def test_quality_check_passes_for_rendered_artifacts(client) -> None:
         "competition_ppt_baseline",
         "enterprise_ppt_baseline",
     }
+
+
+def test_terminal_ellipsis_quality_checks_inspect_final_artifacts(tmp_path) -> None:
+    pptx_path = tmp_path / "truncated.pptx"
+    with zipfile.ZipFile(pptx_path, "w") as archive:
+        archive.writestr(
+            "ppt/slides/slide1.xml",
+            '<p:sld xmlns:p="p" xmlns:a="a"><p:sp><a:t>Visible title…</a:t></p:sp></p:sld>',
+        )
+    html_path = tmp_path / "truncated.html"
+    html_path.write_text("<main><h1>Visible title...</h1></main>", encoding="utf-8")
+
+    assert quality_service._pptx_terminal_ellipsis_issues(pptx_path)
+    assert quality_service._html_terminal_ellipsis_issues(html_path)
 
 
 def test_quality_check_reports_failed_artifact_safely(client, tmp_path) -> None:

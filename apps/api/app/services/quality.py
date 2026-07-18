@@ -38,6 +38,7 @@ ENTERPRISE_PPT_BASELINE_CHECKS = {
     "pptx_foreground_bounds",
     "pptx_text_fit_estimate",
     "pptx_visible_copy_hygiene",
+    "pptx_visible_copy_completeness",
     "pptx_text_encoding_integrity",
     "html_frame_count",
     "html_visual_assets",
@@ -49,6 +50,7 @@ ENTERPRISE_PPT_BASELINE_CHECKS = {
     "html_explainer_layers",
     "html_explanation_mode_diversity",
     "html_visible_copy_hygiene",
+    "html_visible_copy_completeness",
     "html_text_encoding_integrity",
     "competition_story_arc",
     "competition_copy_density",
@@ -358,6 +360,21 @@ def check_render_quality(
                 ),
             }
         )
+        pptx_completeness_issues = _pptx_terminal_ellipsis_issues(pptx_path)
+        checks.append(
+            {
+                "schemaVersion": "1.0.0",
+                "name": "pptx_visible_copy_completeness",
+                "status": "passed" if not pptx_completeness_issues else "failed",
+                "detail": (
+                    "PPTX visible copy contains no renderer-truncated phrases."
+                    if not pptx_completeness_issues
+                    else "PPTX contains visibly truncated copy ending in ellipses: "
+                    + ", ".join(pptx_completeness_issues[:6])
+                    + "."
+                ),
+            }
+        )
         pptx_encoding_issues = _pptx_text_encoding_issues(pptx_path)
         checks.append(
             {
@@ -453,6 +470,21 @@ def check_render_quality(
                     "HTML visible copy contains no internal planning labels."
                     if not html_copy_issues
                     else f"HTML exposes internal planning labels: {', '.join(html_copy_issues[:5])}."
+                ),
+            }
+        )
+        html_completeness_issues = _html_terminal_ellipsis_issues(html_path)
+        checks.append(
+            {
+                "schemaVersion": "1.0.0",
+                "name": "html_visible_copy_completeness",
+                "status": "passed" if not html_completeness_issues else "failed",
+                "detail": (
+                    "HTML visible copy contains no renderer-truncated phrases."
+                    if not html_completeness_issues
+                    else "HTML contains visibly truncated copy ending in ellipses: "
+                    + ", ".join(html_completeness_issues[:6])
+                    + "."
                 ),
             }
         )
@@ -554,10 +586,12 @@ def _customer_delivery_readiness_check(checks: list[dict[str, str]]) -> dict[str
         "pptx_foreground_bounds",
         "pptx_text_fit_estimate",
         "pptx_visible_copy_hygiene",
+        "pptx_visible_copy_completeness",
         "pptx_text_encoding_integrity",
         "html_visual_assets",
         "hyperframes_motion",
         "html_visible_copy_hygiene",
+        "html_visible_copy_completeness",
         "html_text_encoding_integrity",
         "competition_ppt_baseline",
         "award_grade_design_contract",
@@ -767,7 +801,10 @@ def _competition_copy_density_check(slide_deck: SlideDeck) -> dict[str, str]:
         card_count = sum(1 for block in visible_blocks if block.block_type == "card")
         total_chars = sum(len(block.content.strip()) for block in visible_blocks)
         longest_block = max((len(block.content.strip()) for block in visible_blocks), default=0)
-        if len(slide.title) > 88:
+        title_limit = 34 if re.search(r"[\u3400-\u9fff]", slide.title) else 62
+        if re.search(r"(?:…|\.{3})$", slide.title.strip()):
+            issues.append(f"slide {slide.slide_index} title is visibly truncated")
+        if len(slide.title) > title_limit:
             issues.append(f"slide {slide.slide_index} title too long")
         if card_count > 6:
             issues.append(f"slide {slide.slide_index} has {card_count} cards")
@@ -1526,6 +1563,22 @@ def _pptx_visible_copy_issues(path: Path) -> list[str]:
     return _internal_copy_issues("\n".join(text_parts))
 
 
+def _pptx_terminal_ellipsis_issues(path: Path) -> list[str]:
+    issues: list[str] = []
+    with zipfile.ZipFile(path) as archive:
+        for name in archive.namelist():
+            if not (name.startswith("ppt/slides/slide") and name.endswith(".xml")):
+                continue
+            slide_match = re.search(r"slide(\d+)\.xml$", name)
+            slide_label = f"slide {slide_match.group(1)}" if slide_match else name
+            xml = archive.read(name).decode("utf-8", errors="ignore")
+            for raw_text in re.findall(r"<a:t>(.*?)</a:t>", xml, flags=re.DOTALL):
+                visible = html.unescape(raw_text).strip()
+                if re.search(r"(?:…|\.{3})$", visible):
+                    issues.append(f"{slide_label} '{visible[:48]}'")
+    return issues
+
+
 def _pptx_text_encoding_issues(path: Path) -> list[str]:
     text_parts: list[str] = []
     with zipfile.ZipFile(path) as archive:
@@ -1537,6 +1590,16 @@ def _pptx_text_encoding_issues(path: Path) -> list[str]:
 
 def _html_visible_copy_issues(path: Path) -> list[str]:
     return _internal_copy_issues(path.read_text(encoding="utf-8"))
+
+
+def _html_terminal_ellipsis_issues(path: Path) -> list[str]:
+    source = path.read_text(encoding="utf-8")
+    issues: list[str] = []
+    for raw_text in re.findall(r">([^<>]+)<", source, flags=re.DOTALL):
+        visible = re.sub(r"\s+", " ", html.unescape(raw_text)).strip()
+        if visible and re.search(r"(?:…|\.{3})$", visible):
+            issues.append(f"'{visible[:48]}'")
+    return issues
 
 
 def _text_encoding_issues(value: str) -> list[str]:

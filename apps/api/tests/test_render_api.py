@@ -314,7 +314,12 @@ def test_render_visible_text_cleanup_compacts_titles_and_removes_encoding_damage
         == "人工智能在高等教育中的应用"
     )
     assert "????" not in _clean_visible_text("核心问题????需要确认", role="card")
-    assert _clean_visible_text("人工智能在高等教育课程、评价、治理与学习支持中的系统性重构路径", role="title").endswith("…")
+    compact_title = _clean_visible_text(
+        "人工智能在高等教育课程、评价、治理与学习支持中的系统性重构路径",
+        role="title",
+    )
+    assert compact_title == "人工智能在高等教育课程、评价"
+    assert not compact_title.endswith("…")
 
 
 def test_render_compaction_keeps_required_quoted_business_concept() -> None:

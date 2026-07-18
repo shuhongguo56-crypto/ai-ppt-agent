@@ -1,5 +1,7 @@
+import re
+
 from ai_ppt_contracts import SlideDeck
-from app.services.slide_deck import repair_slide_deck_for_quality
+from app.services.slide_deck import _condense_slide_title, repair_slide_deck_for_quality
 
 
 PROJECT = {
@@ -12,6 +14,28 @@ PROJECT = {
     "audience": "Undergraduates",
     "mode": "professional",
 }
+
+
+def test_long_titles_are_condensed_at_semantic_boundaries_without_ellipses() -> None:
+    english = _condense_slide_title(
+        "Enterprise AI Agent Adoption 2026: From Pilot to Measurable ROI",
+        "en",
+    )
+    chinese = _condense_slide_title(
+        "企业级人工智能智能体落地路线：从试点验证逐步进入规模化价值交付阶段",
+        "zh",
+    )
+    generic = _condense_slide_title(
+        "Act on: translate the conclusion into steps Executive leadership can repeat and verify",
+        "en",
+    )
+
+    assert english == "Enterprise AI Agent Adoption 2026"
+    assert chinese == "企业级人工智能智能体落地路线"
+    assert generic.startswith("Act on: translate the conclusion into steps")
+    assert all(not re.search(r"(?:…|\.{3})$", value) for value in (english, chinese, generic))
+    assert len(english) <= 62
+    assert len(chinese) <= 30
 
 
 def create_project(client) -> None:

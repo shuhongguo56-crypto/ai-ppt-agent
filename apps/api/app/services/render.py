@@ -2240,9 +2240,9 @@ def _visible_text_limit(role: str, value: str) -> int:
 
 
 def _smart_clip_visible_text(value: str, limit: int) -> str:
-    if len(value) <= limit:
-        return value
-    window = value[: max(1, limit - 1)].rstrip()
+    if len(value.rstrip(" .…")) <= limit:
+        return _trim_dangling_visible_text(value)
+    window = value[: max(1, limit)].rstrip()
     boundary = -1
     for marker in ("。", "；", "，", "、", "：", "—", "–", ";", ",", ":", "-", " "):
         candidate = window.rfind(marker)
@@ -2254,7 +2254,23 @@ def _smart_clip_visible_text(value: str, limit: int) -> str:
         space = window.rfind(" ")
         if space >= int(limit * 0.45):
             window = window[:space].rstrip()
-    return window.rstrip("…") + "…"
+    return _trim_dangling_visible_text(window)
+
+
+def _trim_dangling_visible_text(value: str) -> str:
+    text = str(value).rstrip(" .…").strip(" \t\r\n，。；：、,:;-—–")
+    if _contains_cjk(text):
+        while len(text) > 4 and text[-1:] in {"的", "与", "和", "在", "将", "把"}:
+            text = text[:-1].rstrip()
+        return text
+    dangling = {
+        "a", "an", "and", "as", "at", "by", "for", "from", "in", "into",
+        "of", "on", "or", "the", "to", "with",
+    }
+    words = text.split()
+    while len(words) > 3 and words[-1].casefold().strip(".,:;—-") in dangling:
+        words.pop()
+    return " ".join(words).rstrip(" .…,:;—-")
 
 
 _CJK_NUMERAL_RE = r"[零〇一二三四五六七八九十百千万两\d]+"
@@ -2519,10 +2535,7 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
             f"--accent:#{slide_accent};--soft:#{slide_soft};"
         )
         explainer_html = _explainer_html(slide)
-        title = _clean_visible_text(
-            _ppt_display_title_for_slide(slide, deck.title),
-            role="title",
-        )
+        title = _ppt_title_text(_ppt_display_title_for_slide(slide, deck.title))
         subtitle = _clean_visible_text(slide.subtitle, role="subtitle")
         slides.append(
             f"""
@@ -3983,7 +3996,10 @@ def _ppt_title_text(value: str) -> str:
     text = _clean_visible_text(value, role="title", clip=False)
     if not text:
         return ""
-    if _display_weight(text) <= 42:
+    text = _trim_dangling_visible_text(text)
+    is_cjk = _contains_cjk(text)
+    title_limit = 30 if is_cjk else 62
+    if len(text) <= title_limit:
         return text
     for separator in ("：", ":", "—", "｜", "|"):
         if separator not in text:
@@ -3991,31 +4007,31 @@ def _ppt_title_text(value: str) -> str:
         head, tail = text.split(separator, 1)
         head = head.strip(" \t\r\n，。；：、,:;-—–")
         tail = tail.strip(" \t\r\n，。；：、,:;-—–")
-        if 2 <= len(head) <= 18 and _display_weight(head) <= 36:
-            generic_heads = {
-                "问题边界",
-                "作用机制",
-                "证据指向",
-                "关键证据",
-                "核心洞察",
-                "因此",
-                "行动优先级",
-                "最终判断",
-                "the real issue",
-                "how it works",
-                "evidence map",
-                "what this means",
-                "act on",
-                "final judgment",
-            }
-            if tail and head.casefold() in generic_heads:
-                tail_limit = 18 if _contains_cjk(text) else 40
-                return f"{head}{separator}{_smart_clip_visible_text(tail, tail_limit)}"
+        generic_heads = {
+            "问题边界",
+            "作用机制",
+            "证据指向",
+            "关键证据",
+            "核心洞察",
+            "因此",
+            "行动优先级",
+            "最终判断",
+            "the real issue",
+            "how it works",
+            "evidence map",
+            "what this means",
+            "act on",
+            "final judgment",
+        }
+        if tail and head.casefold() in generic_heads:
+            tail_limit = 18 if is_cjk else max(24, title_limit - len(head) - 2)
+            display_separator = f"{separator} " if separator == ":" and not is_cjk else separator
+            return f"{head}{display_separator}{_smart_clip_visible_text(tail, tail_limit)}"
+        head_is_meaningful = 4 <= len(head) <= 18 if is_cjk else 8 <= len(head) <= 42
+        if head_is_meaningful:
             return head
     candidate = _presentation_clause(text)
-    if "…" in candidate:
-        return candidate.split("…", 1)[0].strip(" \t\r\n，。；：、,:;-—–")
-    return candidate
+    return _smart_clip_visible_text(candidate, title_limit)
 
 
 def _compact_render_block_text(value: str, slide, *, deck_title: str = "") -> str:
@@ -4442,7 +4458,9 @@ def _premium_statement_copy(value: str) -> str:
             if 12 <= len(head) <= 34:
                 text = head
                 break
-    limit = 34 if _contains_cjk(text) else 82
+    # Keep a complete strategic claim such as “落实战略转向” intact; the
+    # statement layouts have enough width for 36 CJK characters.
+    limit = 36 if _contains_cjk(text) else 82
     return _smart_clip_visible_text(text, limit).strip(" \t\r\n，。；：、?:;—–-)")
 
 

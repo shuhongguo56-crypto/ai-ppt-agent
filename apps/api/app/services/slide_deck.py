@@ -268,7 +268,8 @@ def repair_slide_deck_for_quality(
     for slide_payload in payload["slides"]:
         slide_index = int(slide_payload["slideIndex"])
         if text_repair:
-            repaired_title = _repair_visible_copy(slide_payload["title"], title_limit)
+            repaired_title = _condense_slide_title(slide_payload["title"], language)
+            repaired_title = _clip_title_without_ellipsis(repaired_title, title_limit)
             slide_payload["title"] = repaired_title
             if slide_payload.get("subtitle"):
                 slide_payload["subtitle"] = _repair_visible_copy(
@@ -456,18 +457,80 @@ def _repair_visible_copy(value: str, limit: int) -> str:
     return _clip_text(cleaned, limit)
 
 
+def _clip_title_without_ellipsis(value: str, limit: int) -> str:
+    """Return a presentation-safe phrase without advertising visible truncation."""
+
+    text = re.sub(r"\s+", " ", str(value)).strip(" \t\r\n，。；：、,:;-—–. …")
+    if len(text) <= limit:
+        return _trim_dangling_title_word(text)
+    window = text[:limit].rstrip()
+    boundary = -1
+    for marker in ("。", "；", "，", "、", ";", ",", "—", "-", " "):
+        candidate = window.rfind(marker)
+        if candidate >= int(limit * 0.58):
+            boundary = max(boundary, candidate)
+    if boundary > 0:
+        window = window[:boundary]
+    return _trim_dangling_title_word(window.strip(" \t\r\n，。；：、,:;-—–. …"))
+
+
+def _trim_dangling_title_word(value: str) -> str:
+    text = str(value).rstrip(" .…").strip(" \t\r\n，。；：、,:;-—–")
+    if re.search(r"[\u3400-\u9fff]", text):
+        while len(text) > 4 and text[-1:] in {"的", "与", "和", "在", "将", "把"}:
+            text = text[:-1].rstrip()
+        return text
+    dangling = {
+        "a", "an", "and", "as", "at", "by", "for", "from", "in", "into",
+        "of", "on", "or", "the", "to", "with",
+    }
+    words = text.split()
+    while len(words) > 3 and words[-1].casefold().strip(".,:;—-") in dangling:
+        words.pop()
+    return " ".join(words).rstrip(" .…,:;—-")
+
+
+def _condense_slide_title(value: str, language: str) -> str:
+    text = re.sub(r"\s+", " ", str(value)).strip()
+    limit = 30 if language == "zh" or re.search(r"[\u3400-\u9fff]", text) else 62
+    if len(text.rstrip(" .…")) <= limit and not re.search(r"(?:…|\.{3})$", text):
+        return text
+
+    clean = text.rstrip(" .…")
+    for separator in ("：", ":", "—", "｜", "|"):
+        if separator not in clean:
+            continue
+        head, tail = clean.split(separator, 1)
+        head = head.strip(" \t\r\n，。；：、,:;-—–")
+        tail = tail.strip(" \t\r\n，。；：、,:;-—–")
+        is_cjk = bool(re.search(r"[\u3400-\u9fff]", clean))
+        head_is_meaningful = 4 <= len(head) <= 18 if is_cjk else 8 <= len(head) <= 42
+        if head_is_meaningful:
+            return head
+        if tail and head.casefold() in {
+            "act on", "the real issue", "how it works", "evidence map",
+            "what this means", "final judgment",
+        }:
+            tail_limit = 18 if is_cjk else max(24, limit - len(head) - 2)
+            display_separator = f"{separator} " if separator == ":" and not is_cjk else separator
+            return f"{head}{display_separator}{_clip_title_without_ellipsis(tail, tail_limit)}"
+
+    for clause in re.split(r"[。；;.!?！？]", clean):
+        clause = clause.strip()
+        if (4 if re.search(r"[\u3400-\u9fff]", clause) else 8) <= len(clause) <= limit:
+            return clause
+    return _clip_title_without_ellipsis(clean, limit)
+
+
 def _unique_slide_title(slide, language: str, seen_fingerprints: set[str]) -> str:
-    base = _clip_text(str(slide.title).strip(), 72 if language == "zh" else 96)
+    base = _condense_slide_title(str(slide.title).strip(), language)
     if _low_information_title(base):
         qualifier = _duplicate_title_qualifier(slide, language)
         fallback = _purpose_title_qualifier(str(slide.purpose), language)
         separator = _title_separator(fallback, language)
         if _low_information_title(qualifier):
             qualifier = str(slide.slide_index)
-        base = _clip_text(
-            f"{fallback}{separator}{qualifier}",
-            72 if language == "zh" else 96,
-        )
+        base = _condense_slide_title(f"{fallback}{separator}{qualifier}", language)
     fingerprint = _title_fingerprint(base)
     if fingerprint and fingerprint not in seen_fingerprints:
         seen_fingerprints.add(fingerprint)
@@ -475,14 +538,14 @@ def _unique_slide_title(slide, language: str, seen_fingerprints: set[str]) -> st
 
     qualifier = _duplicate_title_qualifier(slide, language)
     separator = _title_separator(base, language)
-    candidate = _clip_text(f"{base}{separator}{qualifier}", 72 if language == "zh" else 96)
+    title_limit = 30 if language == "zh" else 62
+    suffix = f"{separator}{qualifier}"
+    candidate = f"{_clip_title_without_ellipsis(base, max(8, title_limit - len(suffix)))}{suffix}"
     candidate_fingerprint = _title_fingerprint(candidate)
     if candidate_fingerprint in seen_fingerprints:
         fallback = _purpose_title_qualifier(str(slide.purpose), language)
-        candidate = _clip_text(
-            f"{base}{separator}{fallback} {slide.slide_index}" if separator == ": " else f"{base}{separator}{fallback}{slide.slide_index}",
-            72 if language == "zh" else 96,
-        )
+        suffix = f"{separator}{fallback} {slide.slide_index}" if separator == ": " else f"{separator}{fallback}{slide.slide_index}"
+        candidate = f"{_clip_title_without_ellipsis(base, max(8, title_limit - len(suffix)))}{suffix}"
         candidate_fingerprint = _title_fingerprint(candidate)
     if candidate_fingerprint:
         seen_fingerprints.add(candidate_fingerprint)
@@ -499,7 +562,7 @@ def _duplicate_title_qualifier(slide, language: str) -> str:
         cleaned = _compact_diagram_label(candidate)
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" \t\r\n，。；：、,:;-—–")
         if cleaned and _title_fingerprint(cleaned) != _title_fingerprint(str(slide.title)):
-            return _clip_text(cleaned, 18 if language == "zh" else 36)
+            return _clip_title_without_ellipsis(cleaned, 18 if language == "zh" else 36)
     return _purpose_title_qualifier(str(slide.purpose), language)
 
 
