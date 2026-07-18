@@ -227,7 +227,7 @@ def test_supported_image_types_keep_semantic_subjects_and_no_text_contract() -> 
             purpose="explain the strategic decision",
             image_prompt="premium presentation visual",
             slide_title="Growth priorities",
-            slide_intent="show the conclusion clearly",
+            slide_intent="show the strategic decision clearly",
             asset_role="context",
             image_treatment="masked_window",
             composition_archetype="editorial_split",
@@ -448,9 +448,12 @@ def test_render_creates_pptx_and_hyperframes_from_same_slide_deck(client) -> Non
     assert "--type-subtitle: clamp(17px, 1.85vw, 25px)" in html
     assert "--type-card: clamp(14px, 1.18vw, 17px)" in html
     assert "--content-w: min(560px, 47%)" in html
-    assert "--image-left: 56%" in html
+    assert "--content-left: 0%" in html
+    assert "--asset-inset: 0" in html
     assert "max-width: var(--content-w) !important" in html
-    assert "inset: 10% 5% 10% var(--image-left) !important" in html
+    assert "inset: var(--asset-inset) !important" in html
+    assert "--content-w: 42%; --content-left: 53%" in html
+    assert "--content-w: 86%; --content-left: 7%" in html
     assert "display: none !important" in html
     assert 'data-action="next"' in html
     assert 'data-action="present"' in html
@@ -544,11 +547,9 @@ def test_render_creates_pptx_and_hyperframes_from_same_slide_deck(client) -> Non
     assert "SimSun" in slide1
     assert "Aptos" not in master + slide1
     assert "Microsoft YaHei" not in master + slide1
-    cover_title_size = _font_size_for_shape(slide1, "Text 5")
-    assert 2800 <= cover_title_size <= 3300
-    cover_statement_size = _font_size_for_shape(slide1, "Text 25")
-    assert 1460 <= cover_statement_size <= 1780
-    cover_card_size = _font_size_for_shape(slide1, "Card 26")
+    cover_title_size = _font_size_for_shape(slide1, "Text 12")
+    assert 2550 <= cover_title_size <= 3300
+    cover_card_size = _font_size_for_shape(slide1, "Card 14")
     assert 1220 <= cover_card_size <= 1540
     assert int(re.search(r"<p:sldLayoutId id=\"(\d+)\"", master).group(1)) >= 2147483648
     assert "ppt/slides/slide1.xml" in names
@@ -562,11 +563,14 @@ def test_render_creates_pptx_and_hyperframes_from_same_slide_deck(client) -> Non
     assert "../media/" in slide1_rels
     assert "<p:pic>" in slide1
     assert "Reference Full-Bleed Visual" in slide1
-    assert all("Page Visual " in xml for xml in slide_xml)
+    assert sum("Page Visual " in xml for xml in slide_xml) >= 2
     assert "Image Agent " in slide1
     assert deck["slideDeck"]["imagePlan"][0]["imageType"] in slide1
-    assert "F7FAF6" in slide1
-    assert "10251F" in slide1
+    page_backgrounds = {
+        re.search(r'name="Shape 2".*?<a:srgbClr val="([0-9A-F]{6})"', xml, flags=re.DOTALL).group(1)
+        for xml in slide_xml
+    }
+    assert len(page_backgrounds) >= 4
     assert "Page Plan cinematic_hero" in slide1 or "Page Plan editorial_cover" in slide1 or "Page Plan architectural_cover" in slide1
     assert all("Page Explainer " in xml for xml in slide_xml)
     assert all('name="Card 710"' not in xml for xml in slide_xml)
@@ -574,7 +578,7 @@ def test_render_creates_pptx_and_hyperframes_from_same_slide_deck(client) -> Non
     assert all('horzOverflow="clip"' in xml for xml in slide_xml)
     assert all('vertOverflow="clip"' in xml for xml in slide_xml)
     assert all('anchor="mid"' not in xml for xml in slide_xml)
-    assert all('anchor="ctr"' in xml for xml in slide_xml)
+    assert all('anchor="t"' in xml for xml in slide_xml)
     assert deck["slideDeck"]["slides"][0]["designPlan"]["diagramLabels"][0] in slide1
     assert '<a:off x="0" y="0"/>' in slide1
     assert '<a:ext cx="12192000" cy="6858000"/>' in slide1
@@ -584,10 +588,10 @@ def test_render_creates_pptx_and_hyperframes_from_same_slide_deck(client) -> Non
     assert "Explain how this slide advances" not in slide1
     assert "SECTION 02" not in slide2
     assert "EVIDENCE VIEW" not in slide5
-    assert "Agenda Vertical Rhythm" in slide2
-    assert "Framework Connector" in slide_xml[3]
-    assert "Evidence Logic Rail" in slide5
-    assert "Insight Pause Line" in slide_xml[5]
+    assert 'name="Text 132"' in slide2
+    assert 'name="Design Shape 164"' in slide_xml[3]
+    assert 'name="Card 160"' in slide5
+    assert 'name="Text 154"' in slide_xml[5]
     assert "Closing Horizon" in slide_xml[-1]
     assert "CORE MESSAGE" not in slide1
     assert "WHAT TO EXPECT" not in slide1
@@ -613,7 +617,7 @@ def test_open_visual_search_uses_wikipedia_page_images_without_bing_key(tmp_path
                 "query": {
                     "pages": {
                         "1": {
-                            "title": "Luckin Coffee",
+                            "title": "Modern coffee shop Luckin Coffee",
                             "fullurl": "https://en.wikipedia.org/wiki/Luckin_Coffee",
                             "original": {"source": "https://upload.wikimedia.org/luckin.jpg"},
                         }
@@ -628,6 +632,7 @@ def test_open_visual_search_uses_wikipedia_page_images_without_bing_key(tmp_path
 
     monkeypatch.setattr(render_service, "_read_json_url", fake_read_json_url)
     monkeypatch.setattr(render_service, "_download_binary", fake_download_binary)
+    monkeypatch.setattr(render_service, "_image_has_excessive_visible_text", lambda _path: False)
 
     asset = render_service._search_open_visual_asset(
         1,
@@ -637,7 +642,7 @@ def test_open_visual_search_uses_wikipedia_page_images_without_bing_key(tmp_path
         purpose="用配图解释瑞幸咖啡的商业场景",
         prompt="瑞幸咖啡商业场景",
         provider_chain=["open_web_search"],
-        timeout_seconds=0.2,
+        timeout_seconds=1.0,
     )
 
     assert asset is not None
@@ -715,6 +720,16 @@ def test_electric_vehicle_search_uses_slide_intent_before_generic_topic() -> Non
     assert "automotive battery manufacturing" in queries
 
 
+def test_coffee_retail_search_uses_page_job_instead_of_ambiguous_chinese_title() -> None:
+    queries = render_service._cross_language_image_queries(
+        "瑞幸 落地路径 指标化验收 会员复购与履约成本",
+        "icon_illustration",
+    )
+
+    assert queries[0] == "coffee shop operations team"
+    assert "barista workflow coffee shop" in queries
+
+
 def test_openverse_ranking_prefers_specific_non_textual_metadata() -> None:
     specific = {
         "title": "Electric vehicle factory production line",
@@ -762,6 +777,18 @@ def test_licensed_candidate_requires_page_specific_relevance() -> None:
         "automotive battery manufacturing factory production line",
         "automotive battery manufacturing",
     ) is True
+    assert render_service._candidate_metadata_is_relevant("凌空抽射", "落地路径") is False
+    assert render_service._candidate_metadata_is_relevant("香港—深圳边界", "背景边界") is False
+
+
+def test_incomplete_cover_label_uses_complete_outline_claim() -> None:
+    slide = SimpleNamespace(
+        purpose="cover",
+        title="封面主张：luckin coffee，OTC…",
+        blocks=[SimpleNamespace(content="主线不是单次营销，而是可复制的增长系统。")],
+    )
+
+    assert render_service._ppt_display_title_for_slide(slide, "瑞幸") == "瑞幸：可复制的增长系统"
 
 
 def test_premium_statement_ends_on_a_complete_claim() -> None:
@@ -1089,6 +1116,85 @@ def test_visual_asset_resolution_recovers_real_asset_from_prior_repair_version(
     assert assets[1].file_name == "slide-1-recovered-v1.jpg"
     assert assets[1].path.read_bytes() == old_image.read_bytes()
     assert "recovered from slide-deck-v1" in (assets[1].attribution or "")
+
+
+def test_visual_asset_resolution_recovers_prior_asset_when_provider_keeps_repeating_bytes(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(render_service.time, "sleep", lambda _seconds: None)
+    project_root = tmp_path / "project-duplicate-repair"
+    old_assets = project_root / "slide-deck-v1" / "assets"
+    current_render = project_root / "slide-deck-v2"
+    old_assets.mkdir(parents=True)
+    prior_image = old_assets / "slide-2-ai.jpg"
+    prior_image.write_bytes(b"\xff\xd8\xff\xe0unique-prior-slide-two")
+    (old_assets / "slide-2-asset.json").write_text(
+        __import__("json").dumps(
+            {
+                "slide": 2,
+                "fileName": prior_image.name,
+                "mimeType": "image/jpeg",
+                "sourceType": "free_ai_fallback",
+                "alt": "Prior unique image",
+                "query": "page two",
+                "imageType": "business_scene",
+                "purpose": "Explain slide 2",
+                "prompt": "award-winning page two visual with a single focal subject",
+                "providerChain": ["Pollinations FLUX API"],
+                "attribution": "Generated previously",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class RepeatingGateway:
+        def generate(self, request):
+            return GeneratedImage(
+                bytes=b"\xff\xd8\xff\xe0provider-repeated-image",
+                mime_type="image/jpeg",
+                width=request.width,
+                height=request.height,
+                model="pollinations:flux",
+            )
+
+    def slide(slide_index: int):
+        return SimpleNamespace(
+            slide_index=slide_index,
+            title=f"Slide {slide_index}",
+            visual_intent=f"Explain slide {slide_index}",
+            design_plan=SimpleNamespace(
+                asset_role="hero",
+                image_treatment="masked_window",
+                composition_archetype="editorial_cover",
+            ),
+        )
+
+    def image_plan(slide_index: int):
+        return SimpleNamespace(
+            slide=slide_index,
+            search_query=f"page {slide_index}",
+            image_type="business_scene",
+            purpose=f"Explain slide {slide_index}",
+            prompt=f"award-winning page {slide_index} visual with a single focal subject",
+            provider_chain=["Pollinations FLUX API"],
+        )
+
+    deck = SimpleNamespace(
+        slides=[slide(1), slide(2)],
+        image_plan=[image_plan(1), image_plan(2)],
+        theme=SimpleNamespace(name="Editorial", palette=["#111111", "#F2BF4A"]),
+    )
+
+    assets = render_service.resolve_visual_assets(
+        deck,
+        current_render,
+        RepeatingGateway(),
+        mode="generate",
+        image_search_enabled=False,
+    )
+
+    assert assets[1].path.read_bytes() != assets[2].path.read_bytes()
+    assert assets[2].file_name == "slide-2-recovered-v1.jpg"
 
 
 def test_visual_asset_resolution_runs_first_candidates_concurrently(tmp_path) -> None:

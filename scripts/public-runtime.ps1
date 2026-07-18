@@ -121,6 +121,14 @@ function Publish-PagesEntry([string]$Origin) {
 </html>
 "@
 
+  # Keep the redirect fallback readable even when this script is opened by a
+  # legacy Windows host that interprets the here-string with the wrong codepage.
+  $html = [regex]::Replace(
+    $html,
+    "(?s)<body>.*?</body>",
+    ('<body><p>&#27491;&#22312;&#25171;&#24320; HumanizePPT&#65307;<a href="{0}">&#36827;&#20837;&#32593;&#31449;</a></p></body>' -f $target)
+  )
+
   $content = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($html))
   $metadata = gh api "repos/$Repository/contents/live/index.html?ref=$PagesBranch" | ConvertFrom-Json
   $remoteHtml = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($metadata.content -replace "\s", "")))

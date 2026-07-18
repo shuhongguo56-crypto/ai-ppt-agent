@@ -615,3 +615,24 @@ Completed on 2026-07-18:
 - Failed project `demo-1784386400321` was repaired to SlideDeck v6. Slide 8 recovered the prior accepted Pollinations image instead of `safe_vector_fallback`; all 8 images are distinct JPEG assets.
 - Final quality result: 44/44 passed, including `visual_asset_source_quality`, `award_grade_design_contract`, `competition_ppt_baseline`, `customer_delivery_readiness`, `enterprise_ppt_baseline`, and `visual_asset_uniqueness`.
 - Verification: 361 Python tests passed, TypeScript typecheck passed, and Git whitespace validation passed.
+
+## Content-driven multi-composition renderer and semantic image correction
+
+Completed on 2026-07-19:
+
+- Removed the universal PPTX/HyperFrames fallback that flattened every page into left-side copy plus a right-side image.
+- Canonical composition archetypes now render through distinct geometry families: hero, chapter index, editorial split, system map, proof mosaic, statement focus, process ribbon, comparison, priority stack, and closing.
+- PPTX and HyperFrames rotate restrained page faces while preserving the selected theme, so adjacent pages no longer share one identical background treatment.
+- Image windows now move by page job (full-bleed, left/right window, central hub, upper evidence strip, narrow priority panel); full-canvas narrative pages use the page-specific visual as an atmospheric background instead of duplicating a right-hand picture.
+- SimSun text fitting now uses conservative CJK line-height metrics, larger vertical insets, top anchoring, and near-native PowerPoint autofit scale. QA uses the same metrics.
+- Incomplete generic cover labels are replaced only with a complete claim already present in the same confirmed outline page; the renderer does not invent external copy.
+- CJK-only licensed-image candidates must now match the actual Chinese concept instead of receiving an automatic zero-threshold pass. This blocks false matches such as “落地路径” -> football and “背景边界” -> geographic border.
+- Luckin/coffee pages receive page-job-specific English search intents for context, evidence, growth mechanisms, operations, and conclusion. Conclusion generation uses a text-safe physical still-life path.
+- If a free image provider repeats identical bytes through all uniqueness attempts, the result is marked unresolved and the semantically identical prior-version recovery path runs before any placeholder fallback.
+- Research notes and primary-source links are recorded in `docs/OPEN_SOURCE_PPT_LAYOUT_RESEARCH.md`.
+- Customer-checked artifact: `D:\Codex\Outputs\ai-ppt-customer-delivery-20260719-004251`.
+- PowerPoint 16.0 opened the generated PPTX, reported 8 slides and valid slideshow settings, and exported all eight pages to 1600×900 PNGs for visual inspection.
+- Enterprise quality gate passed with no failed checks after the final semantic-image and layout repairs.
+- Final regression: 364 Python tests passed; the Next.js typecheck and production/static build passed.
+- Delivery-package inspection confirmed 8 slides, 8 distinct embedded media files, SimSun for Chinese, Times New Roman for English, valid slideshow properties, and no visible ellipsis or replacement characters in slide text.
+- The final 8-page PowerPoint contact sheet is `D:\Codex\Outputs\ai-ppt-customer-delivery-20260719-004251\powerpoint-contact-sheet.jpg`.

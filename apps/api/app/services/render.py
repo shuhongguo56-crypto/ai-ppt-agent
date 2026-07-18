@@ -120,9 +120,11 @@ class RenderTextBlock:
 
 
 class RenderSlideProxy:
-    def __init__(self, slide, *, subtitle: str) -> None:
+    def __init__(self, slide, *, subtitle: str, title: str | None = None) -> None:
         self._slide = slide
         self.subtitle = subtitle
+        if title is not None:
+            self.title = title
 
     def __getattr__(self, name: str):
         return getattr(self._slide, name)
@@ -302,6 +304,11 @@ def resolve_visual_assets(
                 if generated_asset is not None and generated_hash and generated_hash not in seen_image_hashes:
                     asset = generated_asset
                     break
+            # A provider that keeps returning the same bytes has not produced a
+            # usable page-specific asset. Treat that outcome as unresolved so the
+            # proven prior-version recovery path runs before any local fallback.
+            if asset is not None and _visual_asset_hash(asset.path) in seen_image_hashes:
+                asset = None
         if asset is None:
             asset = _recover_prior_version_visual_asset(
                 slide.slide_index,
@@ -799,6 +806,24 @@ def _candidate_metadata_is_relevant(metadata: str, query: str) -> bool:
         return True
     metadata_lower = metadata.casefold()
     query_tokens = set(re.findall(r"[a-z0-9]{3,}", query.casefold()))
+    if not query_tokens:
+        # CJK-only searches used to receive an automatic relevance score of
+        # zero, which let pages such as “落地路径” accept an unrelated football
+        # article or “背景边界” accept a geographic border photograph.
+        chunks = re.findall(r"[\u3400-\u9fff]{2,}", query)
+        for chunk in chunks:
+            if len(chunk) >= 4 and chunk in metadata:
+                return True
+        bigrams = {
+            chunk[index : index + 2]
+            for chunk in chunks
+            for index in range(max(0, len(chunk) - 1))
+            if chunk[index : index + 2] not in {"内容", "构图", "呈现", "核心", "页面"}
+        }
+        if not bigrams:
+            return False
+        matched = sum(1 for term in bigrams if term in metadata)
+        return matched >= 2 and matched / len(bigrams) >= 0.6
     scene_intents = query_tokens & SCENE_INTENT_TERMS
     if scene_intents and not all(intent in metadata_lower for intent in scene_intents):
         return False
@@ -1215,7 +1240,13 @@ def _ai_image_generation_prompt(
         purpose,
         semantic_queries[0] if semantic_queries else query,
     )
-    if _is_text_risk_image_type(image_type) or _has_text_risk_visual_cues(
+    if _is_text_risk_image_type(image_type) or _requires_text_safe_conclusion_visual(
+        query,
+        image_prompt,
+        slide_title,
+        slide_intent,
+        purpose,
+    ) or _has_text_risk_visual_cues(
         query,
         image_prompt,
         slide_title,
@@ -1251,6 +1282,14 @@ def _ai_image_generation_prompt(
         f"Palette: {', '.join(palette)}. "
         "Style: award-grade editorial photography, cinematic but clean, professional, layered foreground/midground/background, "
         "premium lighting, restrained color, no collage, no infographic, no typography, and generous negative space."
+    )
+
+
+def _requires_text_safe_conclusion_visual(*values: str) -> bool:
+    text = " ".join(str(value) for value in values).casefold()
+    return any(
+        marker in text
+        for marker in ("\u7ed3\u8bba", "\u6536\u675f", "\u6700\u7ec8\u5224\u65ad", "conclusion", "closing", "final judgment")
     )
 
 
@@ -1706,6 +1745,50 @@ def _cross_language_image_queries(query: str, image_type: str) -> list[str]:
         return ["artificial intelligence research", "computer science laboratory", "technology abstract"]
     if any(marker in lowered for marker in ("教育", "课堂", "大学", "education", "university", "classroom")):
         return ["university classroom", "students lecture hall", "academic research"]
+    coffee_retail = any(
+        marker in lowered
+        for marker in (
+            "\u745e\u5e78", "\u5496\u5561", "\u96f6\u552e", "\u95e8\u5e97",
+            "luckin", "coffee", "retail", "store",
+        )
+    )
+    if coffee_retail:
+        if any(
+            marker in lowered
+            for marker in (
+                "\u843d\u5730", "\u8def\u5f84", "\u884c\u52a8", "\u6307\u6807", "\u9a8c\u6536",
+                "recommendation", "roadmap", "operations",
+            )
+        ):
+            return ["coffee shop operations team", "barista workflow coffee shop", "coffee retail supply chain"]
+        if any(
+            marker in lowered
+            for marker in (
+                "\u8bc1\u636e", "\u590d\u8d2d", "\u4f1a\u5458", "\u6570\u5b57\u5316",
+                "evidence", "customer", "member",
+            )
+        ):
+            return ["coffee shop customer counter", "busy coffee shop service", "coffee shop barista customer"]
+        if any(
+            marker in lowered
+            for marker in (
+                "\u589e\u957f", "\u673a\u5236", "\u98de\u8f6e", "\u4f9b\u5e94\u94fe",
+                "growth", "mechanism", "supply chain",
+            )
+        ):
+            return ["busy modern coffee shop counter", "coffee beans supply chain", "coffee shop barista service"]
+        if any(
+            marker in lowered
+            for marker in (
+                "\u4fe1\u4efb", "\u80cc\u666f", "\u8fb9\u754c", "trust", "context",
+            )
+        ):
+            return ["modern coffee shop customer service", "coffee shop counter interior", "barista serving coffee customer"]
+        if "luckin" in lowered and any(
+            marker in lowered for marker in ("\u7ed3\u8bba", "\u6848\u4f8b", "conclusion", "case")
+        ):
+            return ["luckin coffee", "modern coffee shop", "coffee shop counter"]
+        return ["modern coffee shop", "coffee shop counter", "coffee store interior"]
     if any(marker in lowered for marker in ("咖啡", "零售", "门店", "coffee", "retail", "store")):
         return ["modern coffee shop", "retail business", "coffee store interior"]
     if any(marker in lowered for marker in ("论文", "研究", "thesis", "research")):
@@ -2157,12 +2240,12 @@ def _ceil_div(value: int, divisor: int) -> int:
 
 def _text_insets_for_role(role: str, cx: int, cy: int) -> tuple[int, int]:
     if role == "title":
-        return (120000 if cx <= 5200000 else 160000, 70000)
+        return (120000 if cx <= 5200000 else 160000, 105000)
     if role == "card":
-        return (190000 if cx <= 2400000 else 240000, 105000 if cy <= 900000 else 125000)
+        return (190000 if cx <= 2400000 else 240000, 125000 if cy <= 900000 else 145000)
     if role == "subtitle":
-        return (115000, 65000)
-    return (100000, 60000)
+        return (115000, 85000)
+    return (100000, 75000)
 
 
 def _weighted_capacity_per_line(cx: int, font_size: int, inset_x: int) -> int:
@@ -2180,7 +2263,11 @@ def _estimated_text_lines(text: str, cx: int, font_size: int, role: str, inset_x
 
 def _required_text_cy(text: str, cx: int, font_size: int, role: str, inset_x: int, inset_y: int) -> int:
     lines = _estimated_text_lines(text, cx, font_size, role, inset_x)
-    line_height = int((font_size / 100.0) * EMU_PER_POINT * (1.16 if role == "title" else 1.28))
+    # SimSun has a taller CJK ascent/descent box than the Latin metrics used by
+    # many PPTX estimators. Reserve real slideshow line height instead of relying
+    # on PowerPoint to clip the top or bottom of the glyphs.
+    line_height_factor = 1.34 if role == "title" else 1.32 if role == "subtitle" else 1.38
+    line_height = int((font_size / 100.0) * EMU_PER_POINT * line_height_factor)
     return lines * line_height + inset_y * 2
 
 
@@ -2233,7 +2320,9 @@ def _fit_text_frame(
         cy = min(max(cy, int(required / 0.88)), max_available_cy)
     x, y, cx, cy = _fit_foreground_box(x, y, cx, cy)
     fitted_text, fitted_size = _fit_visible_text_to_frame(text, cx, cy, font_size, role)
-    anchor = "ctr" if role == "title" and _estimated_text_lines(fitted_text, cx, fitted_size, role, inset_x) <= 2 else "t"
+    # Top anchoring is more stable across Windows Office, WPS and macOS Office
+    # for Chinese serif fonts. Horizontal centering is still controlled by algn.
+    anchor = "t"
     return fitted_text, x, y, cx, cy, fitted_size, anchor
 
 
@@ -2251,12 +2340,23 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
             )
         blocks = "\n".join(block_items[:4])
         plan = slide.design_plan
+        slide_bg, slide_fg, slide_accent, slide_soft, _slide_red, _slide_blue = _slide_visual_palette(
+            deck.theme.palette,
+            slide,
+        )
+        slide_style = (
+            f"--bg:#{slide_bg};--fg:#{slide_fg};"
+            f"--accent:#{slide_accent};--soft:#{slide_soft};"
+        )
         explainer_html = _explainer_html(slide)
-        title = _clean_visible_text(slide.title, role="title")
+        title = _clean_visible_text(
+            _ppt_display_title_for_slide(slide, deck.title),
+            role="title",
+        )
         subtitle = _clean_visible_text(slide.subtitle, role="subtitle")
         slides.append(
             f"""
-            <section class="frame frame-{html.escape(slide.layout)} composition-{html.escape(plan.composition_archetype)} treatment-{html.escape(plan.image_treatment)} motion-{html.escape(plan.motion_preset)}" data-slide="{slide.slide_index}" data-active="{"true" if slide.slide_index == 1 else "false"}" data-motion-engine="HyperFrames" data-reference-style="cinematic-full-bleed" data-composition-archetype="{html.escape(plan.composition_archetype)}" data-composition-variant="{html.escape(plan.composition_variant)}" data-image-treatment="{html.escape(plan.image_treatment)}" data-motion-preset="{html.escape(plan.motion_preset)}" data-content-density="{html.escape(plan.content_density)}" data-asset-role="{html.escape(plan.asset_role)}">
+            <section class="frame frame-{html.escape(slide.layout)} composition-{html.escape(plan.composition_archetype)} treatment-{html.escape(plan.image_treatment)} motion-{html.escape(plan.motion_preset)}" style="{slide_style}" data-slide="{slide.slide_index}" data-active="{"true" if slide.slide_index == 1 else "false"}" data-motion-engine="HyperFrames" data-reference-style="cinematic-full-bleed" data-composition-archetype="{html.escape(plan.composition_archetype)}" data-composition-variant="{html.escape(plan.composition_variant)}" data-image-treatment="{html.escape(plan.image_treatment)}" data-motion-preset="{html.escape(plan.motion_preset)}" data-content-density="{html.escape(plan.content_density)}" data-asset-role="{html.escape(plan.asset_role)}">
               <div class="frame-inner" data-reference-style="cinematic-full-bleed">
                 {asset_html}
                 {explainer_html}
@@ -2412,7 +2512,10 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
     .frame-inner {{
       position: relative;
       --content-w: min(560px, 47%);
-      --image-left: 56%;
+      --content-left: 0%;
+      --asset-inset: 0;
+      --asset-radius: 0px;
+      --frame-overlay: linear-gradient(90deg, color-mix(in srgb, var(--bg) 90%, transparent) 0%, color-mix(in srgb, var(--bg) 64%, transparent) 42%, color-mix(in srgb, var(--bg) 18%, transparent) 72%, color-mix(in srgb, var(--bg) 40%, transparent) 100%);
       overflow: hidden;
       width: min(1280px, 100%);
       aspect-ratio: 16 / 9;
@@ -2463,7 +2566,7 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
       z-index: 1;
       pointer-events: none;
       background:
-        linear-gradient(90deg, color-mix(in srgb, var(--bg) 88%, transparent) 0%, color-mix(in srgb, var(--bg) 66%, transparent) 34%, color-mix(in srgb, var(--bg) 12%, transparent) 64%, color-mix(in srgb, var(--bg) 38%, transparent) 100%),
+        var(--frame-overlay),
         radial-gradient(circle at 18% 78%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 32%),
         radial-gradient(circle at 82% 28%, color-mix(in srgb, var(--soft) 24%, transparent), transparent 34%);
     }}
@@ -2497,13 +2600,11 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
     h1 {{
       max-width: var(--content-w);
       width: var(--content-w);
-      display: -webkit-box;
-      -webkit-line-clamp: 3;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
+      display: block;
+      overflow: visible;
       font-family: "Times New Roman", SimSun, "宋体", serif;
       font-size: var(--type-title);
-      line-height: 1.08;
+      line-height: 1.14;
       margin: 18px 0 20px;
       letter-spacing: -.012em;
       text-wrap: balance;
@@ -2512,10 +2613,8 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
     h2 {{
       max-width: var(--content-w);
       width: var(--content-w);
-      display: -webkit-box;
-      -webkit-line-clamp: 3;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
+      display: block;
+      overflow: visible;
       font-size: var(--type-subtitle);
       line-height: 1.18;
       opacity: .82;
@@ -2525,13 +2624,13 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
     .blocks {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 28px; max-width: var(--content-w); width: var(--content-w); align-items: stretch; }}
     .frame-asset {{
       position: absolute;
-      inset: 0;
+      inset: var(--asset-inset);
       z-index: 0;
       margin: 0;
       border: 0;
       border-radius: inherit;
       overflow: hidden;
-      min-height: 100%;
+      min-height: 0;
       background: var(--bg);
       box-shadow: none;
       transform-origin: 70% 45%;
@@ -2568,15 +2667,15 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
       opacity: .72;
       transform: none;
     }}
-    .treatment-split_crop .frame-asset {{ inset: 10% 5% 10% var(--image-left); border-radius: 28px; }}
+    .treatment-split_crop .frame-asset {{ border-radius: 28px; }}
     .treatment-split_crop .frame-asset::after {{ background: linear-gradient(90deg, rgba(8,10,15,.88), rgba(8,10,15,.06) 34%, rgba(8,10,15,.18)); }}
-    .treatment-masked_window .frame-asset {{ inset: 10% 5% 10% var(--image-left); min-height: auto; border: 1px solid rgba(242,191,74,.36); border-radius: 28px; box-shadow: 0 28px 80px rgba(0,0,0,.42); }}
-    .treatment-layered_cutout .frame-asset {{ inset: 11% 5% 10% var(--image-left); min-height: auto; border: 1px solid rgba(255,255,255,.24); border-radius: 36px; transform: none; box-shadow: -14px 18px 0 rgba(242,191,74,.10), 0 36px 90px rgba(0,0,0,.48); }}
-    .treatment-evidence_strip .frame-asset {{ inset: 18% 5% 14% var(--image-left); height: auto; min-height: auto; border: 1px solid rgba(242,191,74,.30); border-radius: 24px; }}
+    .treatment-masked_window .frame-asset {{ border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent); border-radius: 28px; box-shadow: 0 28px 80px rgba(0,0,0,.42); }}
+    .treatment-layered_cutout .frame-asset {{ border: 1px solid rgba(255,255,255,.24); border-radius: 36px; transform: none; box-shadow: -14px 18px 0 color-mix(in srgb, var(--accent) 12%, transparent), 0 36px 90px rgba(0,0,0,.48); }}
+    .treatment-evidence_strip .frame-asset {{ border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent); border-radius: 24px; }}
     .treatment-atmospheric_backdrop .frame-asset img {{ filter: saturate(.74) contrast(1.08) brightness(.66) blur(1px); transform: scale(1.035); }}
-    .block {{ position: relative; overflow: hidden; min-width: 0; min-height: 104px; max-height: 176px; display: grid; align-content: center; padding: 18px; border-radius: 16px; background: color-mix(in srgb, var(--bg) 84%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); box-shadow: 0 14px 34px rgba(0,0,0,.32); }}
+    .block {{ position: relative; overflow: visible; min-width: 0; min-height: 104px; display: grid; align-content: center; padding: 18px; border-radius: 16px; background: color-mix(in srgb, var(--bg) 91%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); box-shadow: 0 14px 34px rgba(0,0,0,.24); }}
     .block::after {{ content: ""; position: absolute; inset: auto -30px -45px auto; width: 110px; height: 110px; border-radius: 999px; background: var(--accent); opacity: .10; }}
-    .block p {{ display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; font-size: var(--type-card); line-height: 1.34; margin: 0; }}
+    .block p {{ display: block; overflow: visible; font-size: var(--type-card); line-height: 1.38; margin: 0; }}
     .explainer-layer {{
       position: relative;
       z-index: 4;
@@ -2817,6 +2916,121 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
       margin-left: 0 !important;
       transform: none !important;
     }}
+    /* Content-driven composition contract. These rules intentionally come
+       after the legacy safety skin so page-plan geometry is not flattened. */
+    .frame.frame > .frame-inner > h1,
+    .frame.frame > .frame-inner > h2,
+    .frame.frame > .frame-inner > .blocks,
+    .frame.frame > .frame-inner > .explainer-layer {{
+      position: relative !important;
+      inset: auto !important;
+      max-width: var(--content-w) !important;
+      width: var(--content-w) !important;
+      margin-left: var(--content-left) !important;
+      margin-right: 0 !important;
+      min-width: 0 !important;
+      transform: none !important;
+    }}
+    .frame.frame > .frame-inner > h1 {{
+      overflow: visible !important;
+      font-family: "Times New Roman", SimSun, "瀹嬩綋", serif !important;
+      font-size: var(--type-title) !important;
+      line-height: 1.14 !important;
+    }}
+    .frame.frame > .frame-inner > .blocks {{ gap: 14px !important; }}
+    .frame.frame > .frame-inner > .explainer-layer {{
+      padding: 12px !important;
+      margin-top: 0 !important;
+      margin-bottom: 20px !important;
+    }}
+    .frame.frame > .frame-inner > .frame-asset {{
+      inset: var(--asset-inset) !important;
+      z-index: 0 !important;
+      min-height: 0 !important;
+      border-radius: var(--asset-radius) !important;
+      border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent) !important;
+      box-shadow: 0 28px 80px rgba(0,0,0,.32) !important;
+    }}
+    .frame.frame .block {{
+      min-height: 86px !important;
+      max-height: none !important;
+      overflow: visible !important;
+      align-content: center !important;
+    }}
+    .frame.frame .block p {{
+      display: block !important;
+      overflow: visible !important;
+      -webkit-line-clamp: unset !important;
+      font-size: var(--type-card) !important;
+      line-height: 1.38 !important;
+      letter-spacing: -.006em;
+    }}
+
+    .composition-cinematic_hero {{
+      --content-w: 46%; --content-left: 0%; --asset-inset: 8% 5% 9% 56%; --asset-radius: 28px;
+      --frame-overlay: linear-gradient(90deg, color-mix(in srgb, var(--bg) 94%, transparent) 0 42%, color-mix(in srgb, var(--bg) 28%, transparent) 68%, color-mix(in srgb, var(--bg) 10%, transparent));
+    }}
+    .composition-editorial_cover {{
+      --content-w: 42%; --content-left: 53%; --asset-inset: 8% 54% 10% 5%; --asset-radius: 28px;
+      --frame-overlay: linear-gradient(270deg, color-mix(in srgb, var(--bg) 94%, transparent) 0 43%, color-mix(in srgb, var(--bg) 24%, transparent) 70%, color-mix(in srgb, var(--bg) 8%, transparent));
+    }}
+    .composition-architectural_cover {{
+      --content-w: 66%; --content-left: 3%; --asset-inset: 47% 5% 6% 37%; --asset-radius: 26px;
+      --frame-overlay: linear-gradient(180deg, color-mix(in srgb, var(--bg) 92%, transparent) 0 42%, color-mix(in srgb, var(--bg) 22%, transparent) 72%, color-mix(in srgb, var(--bg) 52%, transparent));
+    }}
+    .composition-chapter_index {{
+      --content-w: 63%; --content-left: 0%; --asset-inset: 0;
+      --frame-overlay: linear-gradient(90deg, color-mix(in srgb, var(--bg) 96%, transparent) 0 58%, color-mix(in srgb, var(--bg) 40%, transparent) 83%, color-mix(in srgb, var(--bg) 18%, transparent));
+    }}
+    .composition-editorial_split {{
+      --content-w: 44%; --content-left: 54%; --asset-inset: 0;
+      --frame-overlay: linear-gradient(270deg, color-mix(in srgb, var(--bg) 96%, transparent) 0 45%, color-mix(in srgb, var(--bg) 32%, transparent) 68%, color-mix(in srgb, var(--bg) 12%, transparent));
+    }}
+    .composition-diagonal_story {{ --content-w: 58%; --content-left: 2%; --asset-inset: 0; }}
+    .composition-statement_focus {{
+      --content-w: 86%; --content-left: 7%; --asset-inset: 0;
+      --frame-overlay: radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--bg) 72%, transparent), color-mix(in srgb, var(--bg) 92%, transparent));
+    }}
+    .composition-proof_mosaic {{ --content-w: 52%; --content-left: 0%; --asset-inset: 18% 5% 13% 58%; --asset-radius: 24px; }}
+    .composition-data_landscape {{ --content-w: 92%; --content-left: 4%; --asset-inset: 12% 5% 56% 65%; --asset-radius: 22px; }}
+    .composition-process_ribbon {{ --content-w: 92%; --content-left: 4%; --asset-inset: 11% 5% 56% 56%; --asset-radius: 22px; }}
+    .composition-system_map {{
+      --content-w: 88%; --content-left: 6%; --asset-inset: 30% 36% 25% 36%; --asset-radius: 999px;
+      --frame-overlay: radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--bg) 22%, transparent), color-mix(in srgb, var(--bg) 88%, transparent) 40%, color-mix(in srgb, var(--bg) 96%, transparent));
+    }}
+    .composition-split_comparison {{ --content-w: 92%; --content-left: 4%; --asset-inset: 0; }}
+    .composition-priority_stack {{ --content-w: 73%; --content-left: 0%; --asset-inset: 16% 5% 14% 80%; --asset-radius: 22px; }}
+    .composition-closing_echo,
+    .composition-manifesto_close,
+    .composition-future_horizon {{
+      --content-w: 80%; --content-left: 10%; --asset-inset: 0;
+      --frame-overlay: radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--bg) 54%, transparent), color-mix(in srgb, var(--bg) 88%, transparent));
+    }}
+
+    .composition-proof_mosaic .blocks {{ grid-template-columns: 1fr 1fr !important; }}
+    .composition-proof_mosaic .block:first-child {{ grid-column: 1 / -1 !important; }}
+    .composition-data_landscape .blocks {{ grid-template-columns: 1.3fr repeat(3, .7fr) !important; }}
+    .composition-process_ribbon .frame-inner > .blocks {{
+      position: absolute !important;
+      left: 4% !important; right: 4% !important; bottom: 7% !important;
+      width: auto !important; max-width: none !important; margin-left: 0 !important;
+      grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    }}
+    .composition-system_map .blocks {{ grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }}
+    .composition-split_comparison .blocks {{ grid-template-columns: 1fr 1fr !important; gap: 26px !important; }}
+    .composition-priority_stack .blocks {{ grid-template-columns: 1fr !important; }}
+    .composition-closing_echo .frame-inner,
+    .composition-manifesto_close .frame-inner,
+    .composition-future_horizon .frame-inner {{ align-content: center !important; text-align: center !important; }}
+    .composition-closing_echo .frame-inner > h1,
+    .composition-closing_echo .frame-inner > h2,
+    .composition-closing_echo .frame-inner > .blocks,
+    .composition-manifesto_close .frame-inner > h1,
+    .composition-manifesto_close .frame-inner > h2,
+    .composition-manifesto_close .frame-inner > .blocks,
+    .composition-future_horizon .frame-inner > h1,
+    .composition-future_horizon .frame-inner > h2,
+    .composition-future_horizon .frame-inner > .blocks {{ margin-left: auto !important; margin-right: auto !important; }}
     .speaker-notes {{ display: none; margin-top: 34px; opacity: .66; font-size: 15px; line-height: 1.6; }}
     body[data-notes="true"] .speaker-notes {{ display: block; }}
     .frame[data-active="true"] .frame-inner::after {{ animation: reference-light-sweep 1.4s cubic-bezier(.2,.7,.2,1) both; }}
@@ -3206,11 +3420,11 @@ def _slide_xml(
     visual_asset: VisualAsset | None,
     deck_title: str = "",
 ) -> str:
-    _theme_bg, _theme_fg, _theme_accent, _theme_soft, _theme_red, _theme_blue = _reference_palette(palette)
-    bg, fg, accent, soft, red, blue = "F7FAF6", "10251F", "12A06A", "FFFFFF", "DDEFE7", "DCEBFF"
+    bg, fg, accent, soft, red, blue = _slide_visual_palette(palette, slide)
     slide_for_ppt = RenderSlideProxy(
         slide,
         subtitle=_ppt_subtitle_text(getattr(slide, "subtitle", ""), deck_title),
+        title=_ppt_display_title_for_slide(slide, deck_title),
     )
     content_blocks = _content_blocks(slide_for_ppt, deck_title=deck_title)
     layout_shapes = _layout_shapes(slide_for_ppt, content_blocks, fg, accent, soft)
@@ -3354,6 +3568,59 @@ def _reference_palette(palette: list[str]) -> tuple[str, str, str, str, str, str
     return bg, fg, accent, soft, contrast_a, contrast_b
 
 
+def _mix_ppt_colors(first: str, second: str, second_weight: float) -> str:
+    """Blend two RGB colors for deterministic, theme-aware page variation."""
+
+    first = _ppt_color(first)
+    second = _ppt_color(second)
+    weight = max(0.0, min(1.0, second_weight))
+    channels = []
+    for offset in (0, 2, 4):
+        left = int(first[offset : offset + 2], 16)
+        right = int(second[offset : offset + 2], 16)
+        channels.append(round(left * (1.0 - weight) + right * weight))
+    return "".join(f"{channel:02X}" for channel in channels)
+
+
+def _slide_visual_palette(palette: list[str], slide) -> tuple[str, str, str, str, str, str]:
+    """Give adjacent pages different faces while preserving one design grammar.
+
+    Anchor pages stay cinematic and dark. Evidence, framework and process pages
+    rotate through restrained paper tints. Accent and panel colors still derive
+    from the selected visual direction, so this is variation—not theme drift.
+    """
+
+    theme_bg, theme_fg, theme_accent, theme_soft, contrast_a, contrast_b = _reference_palette(palette)
+    archetype = getattr(getattr(slide, "design_plan", None), "composition_archetype", "")
+    purpose = str(getattr(slide, "purpose", ""))
+    index = max(1, int(getattr(slide, "slide_index", 1)))
+    dark_anchor = purpose in {"cover", "conclusion", "section"} or archetype in {
+        "cinematic_hero",
+        "editorial_cover",
+        "architectural_cover",
+        "statement_focus",
+        "manifesto_close",
+        "future_horizon",
+        "closing_echo",
+    }
+    if dark_anchor:
+        bg = theme_bg if not _is_light_color(theme_bg) else _mix_ppt_colors(theme_bg, "05080D", 0.86)
+        fg = theme_fg if _is_light_color(theme_fg) else "FAF8F2"
+        accent = theme_accent if _is_light_color(theme_accent) else _mix_ppt_colors(theme_accent, "FFFFFF", 0.28)
+        soft = _mix_ppt_colors(bg, theme_soft if _is_light_color(theme_soft) else accent, 0.16)
+        return bg, fg, accent, soft, contrast_a, contrast_b
+
+    paper_faces = ("F7F6F1", "EEF4F7", "F4F0E8", "EEF5F0", "F5EEF1")
+    bg = paper_faces[(index - 1) % len(paper_faces)]
+    fg = theme_bg if not _is_light_color(theme_bg) else "10211E"
+    raw_accent = theme_accent
+    accent = _mix_ppt_colors(raw_accent, fg, 0.48) if _is_light_color(raw_accent) else raw_accent
+    soft = _mix_ppt_colors(bg, raw_accent, 0.13)
+    red = _mix_ppt_colors(bg, contrast_a, 0.24)
+    blue = _mix_ppt_colors(bg, contrast_b, 0.24)
+    return bg, fg, accent, soft, red, blue
+
+
 def _cinematic_backdrop_shapes(
     slide,
     visual_asset: VisualAsset | None,
@@ -3365,6 +3632,7 @@ def _cinematic_backdrop_shapes(
     blue: str,
 ) -> str:
     plan = slide.design_plan
+    archetype = plan.composition_archetype
     visual = (
         _image_pic_shape(
             201,
@@ -3380,7 +3648,45 @@ def _cinematic_backdrop_shapes(
         if visual_asset is not None
         else ""
     )
-    treatment_visual = _treatment_pic_shape(plan.image_treatment, visual_asset)
+    overlay_alpha = {
+        "cinematic_hero": 56000,
+        "editorial_cover": 70000,
+        "architectural_cover": 68000,
+        "chapter_index": 78000,
+        "editorial_split": 76000,
+        "diagonal_story": 72000,
+        "statement_focus": 66000,
+        "proof_mosaic": 90000,
+        "data_landscape": 89000,
+        "process_ribbon": 88000,
+        "system_map": 88000,
+        "split_comparison": 80000,
+        "priority_stack": 88000,
+        "manifesto_close": 57000,
+        "future_horizon": 57000,
+        "closing_echo": 57000,
+    }.get(archetype, 84000)
+    reading_geometry = {
+        "cinematic_hero": (0, 0, 6840000, SLIDE_CY, 82000),
+        "editorial_cover": (0, 0, 6240000, SLIDE_CY, 90000),
+        "architectural_cover": (0, 2800000, 9300000, 4058000, 86000),
+        "chapter_index": (0, 0, SLIDE_CX, SLIDE_CY, 45000),
+        "editorial_split": (0, 0, SLIDE_CX, SLIDE_CY, 42000),
+        "diagonal_story": (0, 0, 6500000, SLIDE_CY, 62000),
+        "statement_focus": (0, 0, SLIDE_CX, SLIDE_CY, 36000),
+        "proof_mosaic": (0, 0, 6700000, SLIDE_CY, 94000),
+        "data_landscape": (0, 0, 7600000, SLIDE_CY, 92000),
+        "process_ribbon": (0, 0, SLIDE_CX, SLIDE_CY, 42000),
+        "system_map": (0, 0, SLIDE_CX, SLIDE_CY, 48000),
+        "split_comparison": (0, 0, SLIDE_CX, SLIDE_CY, 52000),
+        "priority_stack": (0, 0, 9300000, SLIDE_CY, 90000),
+        "manifesto_close": (0, 0, SLIDE_CX, SLIDE_CY, 36000),
+        "future_horizon": (0, 0, SLIDE_CX, SLIDE_CY, 36000),
+        "closing_echo": (0, 0, SLIDE_CX, SLIDE_CY, 36000),
+    }.get(archetype, (0, 0, 7200000, SLIDE_CY, 84000))
+    reading_x, reading_y, reading_cx, reading_cy, reading_alpha = reading_geometry
+    treatment_visual = _treatment_pic_shape(slide, visual_asset)
+    ornaments = _page_backdrop_ornaments(slide, accent, soft, red, blue)
     return "\n".join(
         [
             visual,
@@ -3391,25 +3697,20 @@ def _cinematic_backdrop_shapes(
                 SLIDE_CX,
                 SLIDE_CY,
                 bg,
-                88000,
+                overlay_alpha,
                 name="Reference Cinematic Overlay",
             ),
             _alpha_rect_shape(
                 203,
-                0,
-                0,
-                6840000,
-                SLIDE_CY,
+                reading_x,
+                reading_y,
+                reading_cx,
+                reading_cy,
                 bg,
-                97000,
+                reading_alpha,
                 name="Reference Reading Vignette",
             ),
-            _alpha_rect_shape(204, 0, 0, 76000, SLIDE_CY, accent, 90000, name="Reference Accent Spine"),
-            _alpha_rect_shape(205, 610000, 5960000, 6100000, 42000, accent, 48000, name="Reference Baseline"),
-            _shape(206, "ellipse", 8780000, 690000, 1700000, 1700000, blue, alpha=15000),
-            _shape(207, "ellipse", -520000, 4620000, 1850000, 1850000, red, alpha=17000),
-            _shape(208, "roundRect", 6720000, 540000, 5050000, 5150000, "FFFFFF", alpha=90000, line=accent),
-            _shape(209, "roundRect", 7050000, 880000, 4240000, 4300000, soft, alpha=26000, line=accent),
+            ornaments,
             treatment_visual,
             _alpha_rect_shape(
                 219,
@@ -3440,17 +3741,72 @@ def _cinematic_backdrop_shapes(
     )
 
 
-def _treatment_pic_shape(image_treatment: str, visual_asset: VisualAsset | None) -> str:
+def _page_backdrop_ornaments(slide, accent: str, soft: str, red: str, blue: str) -> str:
+    archetype = slide.design_plan.composition_archetype
+    index = int(getattr(slide, "slide_index", 1))
+    if archetype in {"cinematic_hero", "editorial_cover"}:
+        return "\n".join(
+            [
+                _alpha_rect_shape(204, 520000, 560000, 54000, 5350000, accent, 82000, name="Cover Accent Spine"),
+                _alpha_rect_shape(205, 610000, 5960000, 5750000, 36000, accent, 50000, name="Cover Baseline"),
+                _shape(206, "ellipse", 9300000, 520000, 1480000, 1480000, blue, alpha=16000),
+            ]
+        )
+    if archetype in {"chapter_index", "priority_stack"}:
+        return "\n".join(
+            _alpha_rect_shape(204 + offset, 11100000 + offset * 170000, 720000, 42000, 4850000, accent, 38000 + offset * 9000, name="Vertical Rhythm")
+            for offset in range(3)
+        )
+    if archetype in {"system_map", "statement_focus"}:
+        return "\n".join(
+            [
+                _shape(204, "ellipse", 4240000, 1640000, 3740000, 3740000, soft, alpha=13000, line=accent),
+                _shape(205, "ellipse", 4920000, 2320000, 2380000, 2380000, blue, alpha=9000, line=accent),
+            ]
+        )
+    if archetype in {"proof_mosaic", "data_landscape", "split_comparison"}:
+        return "\n".join(
+            _shape(204 + offset, "roundRect", 9000000 + (offset % 2) * 720000, 800000 + (offset // 2) * 620000, 520000, 420000, accent if offset % 2 == 0 else soft, alpha=12000 + offset * 3000)
+            for offset in range(4)
+        )
+    if archetype in {"process_ribbon", "diagonal_story"}:
+        return "\n".join(
+            [
+                _alpha_rect_shape(204, 720000, 5740000, 10500000, 30000, accent, 50000, name="Process Horizon"),
+                _shape(205, "ellipse", 900000 + (index % 3) * 2400000, 5480000, 420000, 420000, red, alpha=18000),
+            ]
+        )
+    return _alpha_rect_shape(204, 820000, 5660000, 10300000, 36000, accent, 46000, name="Closing Horizon")
+
+
+def _treatment_pic_shape(slide, visual_asset: VisualAsset | None) -> str:
     if visual_asset is None:
         return ""
+    archetype = slide.design_plan.composition_archetype
+    image_treatment = slide.design_plan.image_treatment
+    # Full-canvas editorial layouts use the already embedded background image;
+    # windowed layouts reserve a content-safe, archetype-specific picture zone.
+    if archetype in {
+        "chapter_index",
+        "editorial_split",
+        "diagonal_story",
+        "statement_focus",
+        "split_comparison",
+        "manifesto_close",
+        "future_horizon",
+        "closing_echo",
+    }:
+        return ""
     geometry = {
-        "full_bleed": (6780000, 660000, 4960000, 5000000, True),
-        "atmospheric_backdrop": (6860000, 760000, 4820000, 4860000, True),
-        "split_crop": (6500000, 720000, 5280000, 5000000, True),
-        "masked_window": (7040000, 660000, 4560000, 4820000, True),
-        "layered_cutout": (6900000, 920000, 4700000, 4300000, True),
-        "evidence_strip": (6740000, 1220000, 4980000, 3640000, True),
-    }.get(image_treatment, (6860000, 760000, 4820000, 4860000, True))
+        "cinematic_hero": (6900000, 650000, 4650000, 5100000, True),
+        "editorial_cover": (6960000, 720000, 4520000, 4400000, True),
+        "architectural_cover": (7600000, 760000, 3620000, 2280000, True),
+        "proof_mosaic": (7040000, 1320000, 4260000, 4240000, True),
+        "data_landscape": (7920000, 1680000, 3380000, 1860000, True),
+        "process_ribbon": (7200000, 1420000, 4100000, 1720000, True),
+        "system_map": (4440000, 2050000, 3320000, 3000000, True),
+        "priority_stack": (9740000, 1260000, 1560000, 4320000, True),
+    }.get(archetype, (6900000, 760000, 4620000, 4680000, True))
     x, y, cx, cy, rounded = geometry
     return _image_pic_shape(
         218,
@@ -3498,6 +3854,29 @@ def _ppt_subtitle_text(value: str, deck_title: str) -> str:
         return ""
     limit = 34 if _contains_cjk(text) else 76
     return _smart_clip_visible_text(text, limit).strip(" \t\r\n，。；：、,:;-—–")
+
+
+def _ppt_display_title_for_slide(slide, deck_title: str) -> str:
+    """Replace only visibly incomplete generic cover labels with outline copy."""
+
+    title = _clean_visible_text(getattr(slide, "title", ""), role="title", clip=False)
+    if str(getattr(slide, "purpose", "")) != "cover":
+        return title
+    generic_or_incomplete = (
+        "…" in title
+        or "..." in title
+        or title.casefold().startswith(("封面主张", "封面主题", "cover claim", "cover theme"))
+    )
+    if not generic_or_incomplete:
+        return title
+    for block in getattr(slide, "blocks", []):
+        content = _clean_visible_text(getattr(block, "content", ""), role="card", clip=False)
+        if "而是" not in content:
+            continue
+        claim = content.split("而是", 1)[1].strip(" \t\r\n，。；：:;.-—")
+        if 4 <= len(claim) <= 26:
+            return f"{deck_title}：{claim}" if deck_title else claim
+    return deck_title or _ppt_title_text(title)
 
 
 def _ppt_title_text(value: str) -> str:
@@ -3715,11 +4094,35 @@ def _topic_terms(value: str) -> set[str]:
 
 
 def _layout_shapes(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
-    """Render the safe premium layout selected by the canonical page plan.
+    """Render the canonical content plan through its actual composition family.
 
-    The customer-delivery renderer owns text/image separation, while the
-    archetype inside that renderer changes the actual page geometry.
+    Each family owns different visual gravity, not merely different decoration.
+    This keeps agenda, evidence, framework, insight and closing pages from being
+    collapsed into one universal left-copy/right-image template.
     """
+
+    archetype = getattr(getattr(slide, "design_plan", None), "composition_archetype", "")
+    handlers = {
+        "cinematic_hero": _hero_layout,
+        "editorial_cover": _editorial_cover_layout,
+        "architectural_cover": _architectural_cover_layout,
+        "chapter_index": _chapter_index_layout,
+        "editorial_split": _two_column_layout,
+        "diagonal_story": _diagonal_story_layout,
+        "statement_focus": _statement_focus_layout,
+        "proof_mosaic": _proof_mosaic_layout,
+        "data_landscape": _chart_focus_layout,
+        "process_ribbon": _timeline_layout,
+        "system_map": _system_map_layout,
+        "split_comparison": _split_comparison_layout,
+        "priority_stack": _priority_stack_layout,
+        "manifesto_close": _manifesto_close_layout,
+        "future_horizon": _future_horizon_layout,
+        "closing_echo": _closing_layout,
+    }
+    handler = handlers.get(archetype)
+    if handler is not None:
+        return handler(slide, blocks, fg, accent, soft)
     return _customer_delivery_layout(slide, blocks, fg, accent, soft)
 
 
@@ -4003,13 +4406,14 @@ def _premium_card_shape(
 
 
 def _title_and_subtitle(slide, fg: str, *, title_y: int = 460000, title_size: int = 3100) -> str:
+    display_title = _ppt_title_text(slide.title)
     subtitle = (
         _text_shape(7, slide.subtitle, 720000, title_y + 860000, 9600000, 360000, 1600, fg)
         if slide.subtitle
         else ""
     )
     return (
-        _text_shape(5, slide.title, 700000, title_y, 10200000, 820000, title_size, fg, bold=True)
+        _text_shape(5, display_title, 700000, title_y, 10200000, 920000, _ppt_title_font_size(display_title), fg, bold=True)
         + subtitle
     )
 
@@ -4026,7 +4430,7 @@ def _hero_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
         [
             _shape(10, "roundRect", 7800000, 720000, 3300000, 4800000, soft, alpha=22000, line=accent),
             _shape(11, "ellipse", 8400000, 900000, 2200000, 2200000, accent, alpha=52000),
-            _text_shape(12, slide.title, 720000, 900000, 6500000, 1300000, 3900, fg, bold=True),
+            _text_shape(12, _ppt_title_text(slide.title), 720000, 900000, 6500000, 1450000, _ppt_title_font_size(_ppt_title_text(slide.title), cover=True), fg, bold=True),
             subtitle,
             _card_shape(14, lead, 740000, 3300000, 6200000, 880000, soft, fg, accent),
             _card_shape(15, support, 740000, 4400000, 6200000, 880000, soft, fg, accent),
@@ -4040,7 +4444,7 @@ def _editorial_cover_layout(slide, blocks: list, fg: str, accent: str, soft: str
     return "\n".join(
         [
             _rect_shape(120, 720000, 760000, 900000, 48000, accent),
-            _text_shape(121, slide.title, 720000, 1040000, 5600000, 1800000, 4100, fg, bold=True),
+            _text_shape(121, _ppt_title_text(slide.title), 720000, 1040000, 5600000, 1900000, _ppt_title_font_size(_ppt_title_text(slide.title), cover=True), fg, bold=True),
             _text_shape(122, slide.subtitle or lead, 760000, 3060000, 4700000, 620000, 1750, accent, bold=True),
             _card_shape(123, lead, 760000, 3940000, 4700000, 820000, soft, fg, accent),
             _text_shape(124, support, 7900000, 5150000, 3300000, 520000, 1350, fg, align="r"),
@@ -4054,7 +4458,7 @@ def _architectural_cover_layout(slide, blocks: list, fg: str, accent: str, soft:
         [
             _shape(125, "rect", 620000, 620000, 11000000, 5000000, soft, alpha=9000, line=accent),
             _rect_shape(126, 1160000, 1120000, 64000, 4050000, accent),
-            _text_shape(127, slide.title, 1550000, 3400000, 7200000, 1250000, 3900, fg, bold=True),
+            _text_shape(127, _ppt_title_text(slide.title), 1550000, 3340000, 7200000, 1420000, _ppt_title_font_size(_ppt_title_text(slide.title), cover=True), fg, bold=True),
             _text_shape(128, slide.subtitle or lead, 1580000, 4900000, 6700000, 460000, 1500, accent, bold=True),
             _shape(129, "ellipse", 9100000, 1050000, 1700000, 1700000, accent, alpha=36000),
         ]
@@ -4101,7 +4505,7 @@ def _statement_focus_layout(slide, blocks: list, fg: str, accent: str, soft: str
     )
     return "\n".join(
         [
-            _text_shape(153, slide.title, 720000, 540000, 10200000, 600000, 1800, accent, bold=True),
+            _text_shape(153, _ppt_title_text(slide.title), 720000, 480000, 10200000, 820000, _ppt_title_font_size(_ppt_title_text(slide.title)), accent, bold=True),
             _text_shape(154, statement, 720000, 1450000, 9800000, 2350000, 3600, fg, bold=True),
             support_shapes,
         ]
@@ -4125,12 +4529,20 @@ def _system_map_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> 
         _card_shape(166 + index, block.content, x, y, 3000000, 920000, soft, fg, accent)
         for index, (block, (x, y)) in enumerate(zip(nodes[1:5] or nodes[:1], positions))
     ]
-    center = nodes[0].content if nodes else slide.title
+    center_source = " ".join(
+        [str(getattr(slide, "title", "")), *(block.content for block in nodes[:1])]
+    )
+    if "增长飞轮" in center_source:
+        center = "增长飞轮"
+    else:
+        display_title = _ppt_title_text(slide.title)
+        center = display_title.split("：", 1)[-1].strip() if "：" in display_title else display_title
     return "\n".join(
         [
             _title_and_subtitle(slide, fg, title_y=360000, title_size=2800),
-            _shape(164, "ellipse", 4400000, 2050000, 3300000, 3300000, soft, alpha=44000, line=accent),
-            _text_shape(165, center, 4900000, 3100000, 2300000, 1050000, 1850, fg, bold=True, align="ctr"),
+            _shape(164, "ellipse", 4400000, 2050000, 3300000, 3300000, soft, alpha=9000, line=accent),
+            _shape(165, "roundRect", 3550000, 1400000, 5100000, 620000, "FFFFFF", alpha=97000, line=accent),
+            _text_shape(171, center, 3820000, 1530000, 4560000, 300000, 1520, fg, bold=True, align="ctr", role="card"),
             *shapes,
         ]
     )
@@ -4178,7 +4590,7 @@ def _manifesto_close_layout(slide, blocks: list, fg: str, accent: str, soft: str
     return "\n".join(
         [
             _rect_shape(188, 780000, 820000, 72000, 5000000, accent),
-            _text_shape(189, slide.title, 1280000, 1200000, 8800000, 1900000, 4300, fg, bold=True),
+            _text_shape(189, _ppt_title_text(slide.title), 1280000, 1200000, 8800000, 1900000, _ppt_title_font_size(_ppt_title_text(slide.title), cover=True), fg, bold=True),
             _text_shape(190, takeaway, 1300000, 3620000, 7200000, 950000, 2000, fg),
             _shape(191, "ellipse", 9300000, 4050000, 1500000, 1500000, accent, alpha=39000),
         ]
@@ -4194,7 +4606,7 @@ def _future_horizon_layout(slide, blocks: list, fg: str, accent: str, soft: str)
     )
     return "\n".join(
         [
-            _text_shape(192, slide.title, 920000, 1150000, 10100000, 1200000, 3900, fg, bold=True, align="ctr"),
+            _text_shape(192, _ppt_title_text(slide.title), 920000, 1080000, 10100000, 1400000, _ppt_title_font_size(_ppt_title_text(slide.title), cover=True), fg, bold=True, align="ctr"),
             _text_shape(193, takeaway, 1950000, 2850000, 8300000, 720000, 1900, fg, align="ctr"),
             _rect_shape(198, 720000, 4120000, 10750000, 36000, accent),
             cards,
@@ -4288,7 +4700,7 @@ def _closing_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str
     return "\n".join(
         [
             _shape(110, "roundRect", 1250000, 950000, 9700000, 4550000, soft, alpha=25000, line=accent),
-            _text_shape(111, slide.title, 1650000, 1600000, 8900000, 1100000, 3800, fg, bold=True, align="ctr"),
+            _text_shape(111, _ppt_title_text(slide.title), 1650000, 1500000, 8900000, 1350000, _ppt_title_font_size(_ppt_title_text(slide.title), cover=True), fg, bold=True, align="ctr"),
             _text_shape(112, takeaway, 2100000, 3250000, 8000000, 700000, 1900, fg, align="ctr"),
         ]
     )
@@ -4323,13 +4735,13 @@ def _text_shape(
         inferred_role,
     )
     inset_x, inset_y = _text_insets_for_role(inferred_role, cx, cy)
-    font_scale = 65000 if inferred_role == "title" else 72000 if inferred_role == "subtitle" else 78000
+    font_scale = 90000 if inferred_role == "title" else 92000 if inferred_role == "subtitle" else 94000
     safe = html.escape(cleaned_text)
     bold_attr = ' b="1"' if bold else ""
     return f'''<p:sp>
   <p:nvSpPr><p:cNvPr id="{shape_id}" name="Text {shape_id}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>
   <p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>
-  <p:txBody><a:bodyPr wrap="square" anchor="{anchor}" horzOverflow="clip" vertOverflow="clip" lIns="{inset_x}" tIns="{inset_y}" rIns="{inset_x}" bIns="{inset_y}"><a:normAutofit fontScale="{font_scale}" lnSpcReduction="18000"/></a:bodyPr><a:lstStyle/><a:p><a:pPr algn="{align}"/><a:r><a:rPr lang="zh-CN" sz="{font_size}"{bold_attr}><a:solidFill><a:srgbClr val="{color}"/></a:solidFill><a:latin typeface="Times New Roman"/><a:ea typeface="SimSun"/><a:cs typeface="Times New Roman"/></a:rPr><a:t>{safe}</a:t></a:r></a:p></p:txBody>
+  <p:txBody><a:bodyPr wrap="square" anchor="{anchor}" horzOverflow="clip" vertOverflow="clip" lIns="{inset_x}" tIns="{inset_y}" rIns="{inset_x}" bIns="{inset_y}"><a:normAutofit fontScale="{font_scale}" lnSpcReduction="5000"/></a:bodyPr><a:lstStyle/><a:p><a:pPr algn="{align}"/><a:r><a:rPr lang="zh-CN" sz="{font_size}"{bold_attr}><a:solidFill><a:srgbClr val="{color}"/></a:solidFill><a:latin typeface="Times New Roman"/><a:ea typeface="SimSun"/><a:cs typeface="Times New Roman"/></a:rPr><a:t>{safe}</a:t></a:r></a:p></p:txBody>
 </p:sp>'''
 
 
@@ -4437,9 +4849,8 @@ def _card_shape(
         "card",
     )
     safe_content = html.escape(cleaned_content)
-    font_scale = 70000 if font_size <= 1180 else 78000 if font_size <= 1280 else 84000
-    inset_x = 190000 if cx <= 2400000 else 240000
-    inset_y = 105000 if cy <= 900000 or font_size <= 1180 else 125000
+    font_scale = 90000 if font_size <= 1180 else 92000 if font_size <= 1280 else 94000
+    inset_x, inset_y = _text_insets_for_role("card", cx, cy)
     effect_xml = (
         '<a:effectLst><a:outerShdw blurRad="76200" dist="38100" dir="5400000" rotWithShape="0">'
         '<a:srgbClr val="000000"><a:alpha val="22000"/></a:srgbClr>'
@@ -4448,7 +4859,7 @@ def _card_shape(
     return f'''<p:sp>
   <p:nvSpPr><p:cNvPr id="{shape_id}" name="Card {shape_id}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>
   <p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="roundRect"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="{fill}"><a:alpha val="94000"/></a:srgbClr></a:solidFill><a:ln w="12000"><a:solidFill><a:srgbClr val="{accent}"><a:alpha val="42000"/></a:srgbClr></a:solidFill></a:ln>{effect_xml}</p:spPr>
-  <p:txBody><a:bodyPr wrap="square" anchor="{anchor}" horzOverflow="clip" vertOverflow="clip" lIns="{inset_x}" tIns="{inset_y}" rIns="{inset_x}" bIns="{inset_y}"><a:normAutofit fontScale="{font_scale}" lnSpcReduction="18000"/></a:bodyPr><a:lstStyle/>
+  <p:txBody><a:bodyPr wrap="square" anchor="{anchor}" horzOverflow="clip" vertOverflow="clip" lIns="{inset_x}" tIns="{inset_y}" rIns="{inset_x}" bIns="{inset_y}"><a:normAutofit fontScale="{font_scale}" lnSpcReduction="5000"/></a:bodyPr><a:lstStyle/>
     <a:p><a:r><a:rPr lang="zh-CN" sz="{font_size}"><a:solidFill><a:srgbClr val="{text_color}"/></a:solidFill><a:latin typeface="Times New Roman"/><a:ea typeface="SimSun"/><a:cs typeface="Times New Roman"/></a:rPr><a:t>{safe_content}</a:t></a:r></a:p>
   </p:txBody>
 </p:sp>'''

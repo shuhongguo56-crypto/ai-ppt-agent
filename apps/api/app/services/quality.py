@@ -1356,7 +1356,9 @@ def _estimated_required_text_height(
     capacity = max(10, int((usable_cx * 2) / max(avg_weight_emu, 1.0)))
     weight = sum(2 if "\u3400" <= character <= "\u9fff" else 1 for character in text)
     lines = max(1, (weight + capacity - 1) // capacity)
-    line_height = int(point_size * EMU_PER_POINT * (1.16 if role == "title" else 1.28))
+    # Match the renderer's conservative SimSun metrics so a QA pass reflects
+    # what PowerPoint/WPS actually shows instead of underestimating CJK height.
+    line_height = int(point_size * EMU_PER_POINT * (1.34 if role == "title" else 1.38))
     return lines * line_height + inset_y * 2
 
 
