@@ -8,6 +8,7 @@ import zipfile
 from pathlib import Path
 
 from ai_ppt_contracts import QualityReport, RenderResult, SlideDeck
+from app.services.image_quality import raster_dimensions
 
 
 SLIDE_CX = 12192000
@@ -24,7 +25,10 @@ ENTERPRISE_PPT_BASELINE_CHECKS = {
     "pptx_speaker_notes",
     "pptx_visual_assets",
     "visual_asset_source_quality",
+    "visual_asset_resolution_quality",
+    "visual_asset_license_readiness",
     "visual_asset_uniqueness",
+    "pptx_visual_placement_diversity",
     "pptx_page_plan_markers",
     "pptx_image_agent_plan_markers",
     "pptx_explainer_layers",
@@ -66,6 +70,10 @@ def check_render_quality(
     asset_root: Path,
     quality_profile: str = "standard",
     slide_deck: SlideDeck | None = None,
+    expert_image_min_long_edge: int = 1920,
+    expert_image_min_short_edge: int = 1080,
+    expert_key_image_min_long_edge: int = 3840,
+    expert_key_image_min_short_edge: int = 2160,
 ) -> QualityReport:
     checks = []
     root = asset_root.resolve()
@@ -190,13 +198,60 @@ def check_render_quality(
                 ),
             }
         )
-        full_bleed_count = _pptx_full_bleed_visual_count(pptx_path)
+        asset_resolution = _visual_asset_resolution_quality(
+            pptx_path.parent,
+            expected_slide_count,
+            expert=quality_profile in {"enterprise_ppt", "competition_ppt"},
+            expert_min_long_edge=expert_image_min_long_edge,
+            expert_min_short_edge=expert_image_min_short_edge,
+            expert_key_min_long_edge=expert_key_image_min_long_edge,
+            expert_key_min_short_edge=expert_key_image_min_short_edge,
+        )
         checks.append(
             {
                 "schemaVersion": "1.0.0",
-                "name": "pptx_reference_full_bleed_visuals",
-                "status": "passed" if full_bleed_count >= expected_slide_count else "failed",
-                "detail": f"PPTX contains {full_bleed_count} reference-style full-bleed visual layers; expected {expected_slide_count}.",
+                "name": "visual_asset_resolution_quality",
+                "status": "passed" if asset_resolution["passed"] else "failed",
+                "detail": (
+                    f"Visual assets meet the delivery resolution profile on {asset_resolution['usable']} of {expected_slide_count} slides."
+                    if asset_resolution["passed"]
+                    else "Visual assets are below the delivery resolution floor: "
+                    + ", ".join(asset_resolution["issues"][:6])
+                    + "."
+                ),
+            }
+        )
+        license_readiness = _visual_asset_license_readiness(
+            pptx_path.parent,
+            expected_slide_count,
+        )
+        checks.append(
+            {
+                "schemaVersion": "1.0.0",
+                "name": "visual_asset_license_readiness",
+                "status": "passed" if license_readiness["passed"] else "failed",
+                "detail": (
+                    "Every delivery visual is generated or carries open-license provenance."
+                    if license_readiness["passed"]
+                    else "Preview-only web images require user confirmation before formal export: "
+                    + ", ".join(license_readiness["issues"][:6])
+                    + "."
+                ),
+            }
+        )
+        placement = _pptx_visual_placement_diversity(pptx_path, expected_slide_count)
+        checks.append(
+            {
+                "schemaVersion": "1.0.0",
+                "name": "pptx_visual_placement_diversity",
+                "status": "passed" if placement["passed"] else "failed",
+                "detail": (
+                    f"PPTX uses {placement['unique']} distinct content-driven image placements across {expected_slide_count} slides."
+                    if placement["passed"]
+                    else "PPTX image placement is still too repetitive: "
+                    + ", ".join(placement["issues"][:6])
+                    + "."
+                ),
             }
         )
         page_plan_count = _pptx_page_plan_marker_count(pptx_path)
@@ -437,12 +492,12 @@ def check_render_quality(
         checks.append(
             {
                 "schemaVersion": "1.0.0",
-                "name": "html_reference_cinematic_style",
+                "name": "html_content_driven_visual_system",
                 "status": "passed" if reference_style_marker else "failed",
                 "detail": (
-                    "HTML uses the reference-style cinematic full-bleed visual system."
+                    "HTML uses content-driven visual gravity and placement modes."
                     if reference_style_marker
-                    else "HTML is missing the reference-style cinematic full-bleed visual system."
+                    else "HTML is missing the content-driven visual placement system."
                 ),
             }
         )
@@ -491,7 +546,10 @@ def _customer_delivery_readiness_check(checks: list[dict[str, str]]) -> dict[str
         "pptx_native_powerpoint_scaffold",
         "pptx_visual_assets",
         "visual_asset_source_quality",
+        "visual_asset_resolution_quality",
+        "visual_asset_license_readiness",
         "visual_asset_uniqueness",
+        "pptx_visual_placement_diversity",
         "pptx_font_family_contract",
         "pptx_foreground_bounds",
         "pptx_text_fit_estimate",
@@ -892,7 +950,9 @@ def _html_has_motion_marker(path: Path) -> bool:
 def _html_has_reference_style_marker(path: Path) -> bool:
     html = path.read_text(encoding="utf-8")
     return (
-        'data-reference-style="cinematic-full-bleed"' in html
+        'data-reference-style="content-driven-composition"' in html
+        and 'data-visual-mode="' in html
+        and 'data-visual-gravity="' in html
         and ".frame-asset" in html
         and "position: absolute" in html
         and "object-fit: cover" in html
@@ -1059,20 +1119,37 @@ def _pptx_media_count(path: Path) -> int:
         return sum(1 for name in archive.namelist() if name.startswith("ppt/media/"))
 
 
-def _pptx_full_bleed_visual_count(path: Path) -> int:
-    count = 0
+def _pptx_visual_placement_diversity(path: Path, expected_slide_count: int) -> dict[str, object]:
+    placements: set[tuple[int, int, int, int]] = set()
+    located = 0
     with zipfile.ZipFile(path) as archive:
         for name in archive.namelist():
             if not name.startswith("ppt/slides/slide") or not name.endswith(".xml"):
                 continue
             xml = archive.read(name).decode("utf-8", errors="ignore")
-            if (
-                "Reference Full-Bleed Visual" in xml
-                and '<a:off x="0" y="0"/>' in xml
-                and f'<a:ext cx="{12192000}" cy="{6858000}"/>' in xml
-            ):
-                count += 1
-    return count
+            for picture in re.findall(r"<p:pic>.*?</p:pic>", xml, flags=re.DOTALL):
+                if "Content Visual" not in picture and "Page Visual" not in picture:
+                    continue
+                geometry = re.search(
+                    r'<a:off x="(-?\d+)" y="(-?\d+)"/><a:ext cx="(\d+)" cy="(\d+)"/>',
+                    picture,
+                )
+                if geometry is None:
+                    continue
+                placements.add(tuple(int(value) for value in geometry.groups()))
+                located += 1
+                break
+    required = min(expected_slide_count, 6)
+    issues: list[str] = []
+    if located < expected_slide_count:
+        issues.append(f"only {located}/{expected_slide_count} slides expose a visual placement")
+    if len(placements) < required:
+        issues.append(f"{len(placements)} unique placements; expected at least {required}")
+    return {
+        "passed": located >= expected_slide_count and len(placements) >= required,
+        "unique": len(placements),
+        "issues": issues,
+    }
 
 
 def _pptx_page_plan_marker_count(path: Path) -> int:
@@ -1248,6 +1325,84 @@ def _visual_asset_source_quality(render_dir: Path, expected_slide_count: int) ->
             continue
         usable += 1
     return {"passed": usable >= expected_slide_count and not issues, "usable": usable, "issues": issues[:12]}
+
+
+def _visual_asset_resolution_quality(
+    render_dir: Path,
+    expected_slide_count: int,
+    *,
+    expert: bool,
+    expert_min_long_edge: int,
+    expert_min_short_edge: int,
+    expert_key_min_long_edge: int,
+    expert_key_min_short_edge: int,
+) -> dict[str, object]:
+    assets_dir = render_dir / "assets"
+    issues: list[str] = []
+    usable = 0
+    for slide_index in range(1, expected_slide_count + 1):
+        sidecar = assets_dir / f"slide-{slide_index}-asset.json"
+        try:
+            data = json.loads(sidecar.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            issues.append(f"slide {slide_index} missing resolution metadata")
+            continue
+        file_name = str(data.get("fileName") or "")
+        if not file_name or Path(file_name).name != file_name:
+            issues.append(f"slide {slide_index} invalid image file")
+            continue
+        dimensions = raster_dimensions(assets_dir / file_name)
+        if dimensions is None:
+            issues.append(f"slide {slide_index} unreadable raster")
+            continue
+        width, height = dimensions
+        long_edge, short_edge = max(width, height), min(width, height)
+        profile = str(data.get("resolutionProfile") or "")
+        key_page = expert and (slide_index == 1 or profile == "4K key page")
+        min_long, min_short = (
+            (expert_key_min_long_edge, expert_key_min_short_edge)
+            if key_page
+            else (expert_min_long_edge, expert_min_short_edge)
+            if expert
+            else (1024, 576)
+        )
+        if long_edge < min_long or short_edge < min_short:
+            issues.append(
+                f"slide {slide_index} {width}x{height}; requires {min_long}x{min_short} effective"
+            )
+            continue
+        usable += 1
+    return {
+        "passed": usable >= expected_slide_count and not issues,
+        "usable": usable,
+        "issues": issues[:12],
+    }
+
+
+def _visual_asset_license_readiness(
+    render_dir: Path,
+    expected_slide_count: int,
+) -> dict[str, object]:
+    assets_dir = render_dir / "assets"
+    issues: list[str] = []
+    ready = 0
+    for slide_index in range(1, expected_slide_count + 1):
+        sidecar = assets_dir / f"slide-{slide_index}-asset.json"
+        try:
+            data = json.loads(sidecar.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            issues.append(f"slide {slide_index} missing license metadata")
+            continue
+        status = str(data.get("licenseStatus") or "unknown")
+        if status not in {"generated", "open-license"}:
+            issues.append(f"slide {slide_index} license={status}")
+            continue
+        ready += 1
+    return {
+        "passed": ready >= expected_slide_count and not issues,
+        "ready": ready,
+        "issues": issues[:12],
+    }
 
 
 def _visual_asset_uniqueness(render_dir: Path, expected_slide_count: int) -> dict[str, object]:

@@ -21,6 +21,11 @@ def client(tmp_path) -> Iterator[TestClient]:
         asset_path=tmp_path / "assets",
         image_search_enabled=False,
         topic_research_enabled=False,
+        expert_image_min_long_edge=1024,
+        expert_image_min_short_edge=576,
+        expert_key_image_min_long_edge=1024,
+        expert_key_image_min_short_edge=576,
+        shared_asset_library_path=tmp_path / "asset-library",
     )
     with TestClient(create_app(settings)) as test_client:
         yield test_client

@@ -466,7 +466,9 @@ def test_render_creates_pptx_and_hyperframes_from_same_slide_deck(client) -> Non
     assert 'data-hyperframes-renderer="local"' in html
     assert 'data-motion-engine="HyperFrames"' in html
     assert 'data-deck-contract="SlideDeck JSON"' in html
-    assert 'data-reference-style="cinematic-full-bleed"' in html
+    assert 'data-reference-style="content-driven-composition"' in html
+    assert 'data-visual-mode="' in html
+    assert 'data-visual-gravity="' in html
     assert 'data-design-system="' in html
     assert 'data-composition-archetype="' in html
     assert 'data-image-treatment="' in html
@@ -548,9 +550,9 @@ def test_render_creates_pptx_and_hyperframes_from_same_slide_deck(client) -> Non
     assert "Aptos" not in master + slide1
     assert "Microsoft YaHei" not in master + slide1
     cover_title_size = _font_size_for_shape(slide1, "Text 12")
-    assert 2550 <= cover_title_size <= 3300
+    assert 3600 <= cover_title_size <= 4800
     cover_card_size = _font_size_for_shape(slide1, "Card 14")
-    assert 1220 <= cover_card_size <= 1540
+    assert 1500 <= cover_card_size <= 1800
     assert int(re.search(r"<p:sldLayoutId id=\"(\d+)\"", master).group(1)) >= 2147483648
     assert "ppt/slides/slide1.xml" in names
     assert "ppt/slides/_rels/slide1.xml.rels" in names
@@ -562,7 +564,8 @@ def test_render_creates_pptx_and_hyperframes_from_same_slide_deck(client) -> Non
     assert "ppt/media/" not in slide1_rels
     assert "../media/" in slide1_rels
     assert "<p:pic>" in slide1
-    assert "Reference Full-Bleed Visual" in slide1
+    assert "Page Visual " in slide1 or "Content Visual " in slide1
+    assert all("Page Visual " in xml or "Content Visual " in xml for xml in slide_xml)
     assert sum("Page Visual " in xml for xml in slide_xml) >= 2
     assert "Image Agent " in slide1
     assert deck["slideDeck"]["imagePlan"][0]["imageType"] in slide1

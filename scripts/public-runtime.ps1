@@ -57,6 +57,17 @@ function Start-LocalApi {
   $env:AI_PPT_POLLINATIONS_IMAGE_MODEL = "flux"
   $env:AI_PPT_IMAGE_RESOLUTION_WORKERS = "2"
   $env:AI_PPT_IMAGE_GENERATION_RETRY_ROUNDS = "3"
+  $env:AI_PPT_EXPERT_IMAGE_MIN_LONG_EDGE = "1920"
+  $env:AI_PPT_EXPERT_IMAGE_MIN_SHORT_EDGE = "1080"
+  $env:AI_PPT_EXPERT_KEY_IMAGE_MIN_LONG_EDGE = "3840"
+  $env:AI_PPT_EXPERT_KEY_IMAGE_MIN_SHORT_EDGE = "2160"
+  $realEsrgan = "D:\Codex\Workspaces\ai-ppt-tools\realesrgan-ncnn-vulkan-20220424-windows\realesrgan-ncnn-vulkan.exe"
+  if (Test-Path -LiteralPath $realEsrgan) {
+    $env:AI_PPT_REALESRGAN_ENABLED = "true"
+    $env:AI_PPT_REALESRGAN_EXECUTABLE = $realEsrgan
+    $env:AI_PPT_REALESRGAN_MODEL = "realesrgan-x4plus"
+    $env:AI_PPT_REALESRGAN_TIMEOUT_SECONDS = "180"
+  }
   $env:AI_PPT_TESSDATA_PATH = "D:\Codex\Downloads\tessdata"
   $env:AI_PPT_ALLOWED_ORIGINS = '["https://shuhongguo56-crypto.github.io","https://humanizeppt-studio.almond-gleam-4876.chatgpt.site","http://localhost:3001","http://127.0.0.1:3001"]'
 

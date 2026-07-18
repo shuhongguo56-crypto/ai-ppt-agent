@@ -113,6 +113,10 @@ def check_quality(
         asset_root=settings.asset_path,
         quality_profile=str(policy["qualityProfile"]),
         slide_deck=slide_deck,
+        expert_image_min_long_edge=settings.expert_image_min_long_edge,
+        expert_image_min_short_edge=settings.expert_image_min_short_edge,
+        expert_key_image_min_long_edge=settings.expert_key_image_min_long_edge,
+        expert_key_image_min_short_edge=settings.expert_key_image_min_short_edge,
     )
     latest = request.app.state.repository.latest_checkpoint_for_stage(project_id, "quality")
     expected_version = 0 if latest is None else latest.version

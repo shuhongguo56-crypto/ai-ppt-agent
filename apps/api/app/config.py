@@ -67,6 +67,15 @@ class Settings(BaseSettings):
     pollinations_image_model: str = "flux"
     pollinations_image_referrer: str = "ai-ppt-agent"
     pollinations_image_enhance: bool = True
+    expert_image_min_long_edge: int = Field(default=1920, ge=1024, le=4096)
+    expert_image_min_short_edge: int = Field(default=1080, ge=576, le=4096)
+    expert_key_image_min_long_edge: int = Field(default=3840, ge=1024, le=8192)
+    expert_key_image_min_short_edge: int = Field(default=2160, ge=576, le=8192)
+    realesrgan_enabled: bool = True
+    realesrgan_executable: Path | None = None
+    realesrgan_model: str = "realesrgan-x4plus"
+    realesrgan_timeout_seconds: float = Field(default=180, ge=30, le=300)
+    shared_asset_library_path: Path = Path(".local/asset-library")
     topic_research_enabled: bool = True
     topic_research_timeout_seconds: float = Field(default=6.0, ge=1.0, le=20.0)
     topic_research_max_sources: int = Field(default=5, ge=1, le=8)

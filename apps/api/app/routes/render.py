@@ -86,6 +86,17 @@ def render_project(
             if enterprise_grade
             else min(settings.image_search_timeout_seconds, policy_image_timeout)
         ),
+        expert_mode=enterprise_grade,
+        expert_image_min_long_edge=settings.expert_image_min_long_edge,
+        expert_image_min_short_edge=settings.expert_image_min_short_edge,
+        expert_key_image_min_long_edge=settings.expert_key_image_min_long_edge,
+        expert_key_image_min_short_edge=settings.expert_key_image_min_short_edge,
+        realesrgan_executable=(
+            settings.realesrgan_executable if settings.realesrgan_enabled else None
+        ),
+        realesrgan_model=settings.realesrgan_model,
+        realesrgan_timeout_seconds=settings.realesrgan_timeout_seconds,
+        shared_asset_library_path=settings.shared_asset_library_path,
     )
     latest = request.app.state.repository.latest_checkpoint_for_stage(project_id, "render")
     expected_version = 0 if latest is None else latest.version

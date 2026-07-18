@@ -18,6 +18,15 @@ from app.config import Settings
 from app.main import _image_candidates
 
 
+def _jpeg_stub(width: int = 1024, height: int = 576) -> bytes:
+    return (
+        b"\xff\xd8\xff\xc0\x00\x0b\x08"
+        + height.to_bytes(2, "big")
+        + width.to_bytes(2, "big")
+        + b"\x01\x01\x11\x00\xff\xd9"
+    )
+
+
 def test_fake_text_gateway_is_deterministic_and_json_serializable() -> None:
     gateway = FakeTextGateway()
     request = TextRequest(
@@ -202,7 +211,7 @@ def test_pollinations_image_gateway_downloads_free_flux_image(monkeypatch: pytes
         return httpx.Response(
             200,
             headers={"content-type": "image/jpeg"},
-            content=b"\xff\xd8\xff\xe0free-image",
+            content=_jpeg_stub(),
         )
 
     monkeypatch.setattr("app.ai.image_http.httpx.get", generated_image)
@@ -230,6 +239,25 @@ def test_pollinations_image_gateway_downloads_free_flux_image(monkeypatch: pytes
     }
 
 
+def test_image_gateway_reports_actual_jpeg_dimensions_not_requested_dimensions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.ai.image_http.httpx.get",
+        lambda *_args, **_kwargs: httpx.Response(
+            200,
+            headers={"content-type": "image/jpeg"},
+            content=_jpeg_stub(800, 600),
+        ),
+    )
+
+    image = PollinationsImageGateway(model="flux").generate(
+        ImageRequest("flux", "premium presentation visual", 1024, 576)
+    )
+
+    assert (image.width, image.height) == (800, 600)
+
+
 def test_pollinations_image_gateway_keeps_url_prompt_short_for_batch_generation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -240,7 +268,7 @@ def test_pollinations_image_gateway_keeps_url_prompt_short_for_batch_generation(
         return httpx.Response(
             200,
             headers={"content-type": "image/jpeg"},
-            content=b"\xff\xd8\xff\xe0free-image",
+            content=_jpeg_stub(),
         )
 
     monkeypatch.setattr("app.ai.image_http.httpx.get", generated_image)
@@ -269,7 +297,7 @@ def test_pollinations_image_gateway_retries_temporary_provider_failures(
         return httpx.Response(
             200,
             headers={"content-type": "image/jpeg"},
-            content=b"\xff\xd8\xff\xe0free-image",
+            content=_jpeg_stub(),
         )
 
     monkeypatch.setattr("app.ai.image_http.httpx.get", generated_image)

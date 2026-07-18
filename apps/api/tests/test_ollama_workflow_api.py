@@ -79,6 +79,11 @@ def test_ollama_backend_can_complete_generation_flow(tmp_path, monkeypatch) -> N
             model_backend="ollama",
             ollama_text_model="qwen2.5:7b",
             topic_research_enabled=False,
+            expert_image_min_long_edge=1024,
+            expert_image_min_short_edge=576,
+            expert_key_image_min_long_edge=1024,
+            expert_key_image_min_short_edge=576,
+            shared_asset_library_path=tmp_path / "asset-library",
         )
     )
     app.state.image_gateway = FakeImageGateway()

@@ -1,5 +1,19 @@
 # AI PPT Agent Project State
 
+## 2026-07-19 expert-kernel upgrade
+
+- Research and enterprise rendering now use real raster-dimension gates: 2K ordinary pages and 4K cover/closing pages by default.
+- The official Real-ESRGAN ncnn/Vulkan adapter is wired into the render path and the public runtime for automatic local upscaling.
+- The universal full-bleed image/mask contract has been replaced by a project-owned 16-family composition library with window, strip, edge-panel and full-bleed visual modes.
+- PPTX and HyperFrames HTML now share the same visual placement/gravity definitions; quality requires at least six distinct placements for an eight-slide deck.
+- HTML no longer forces every image to the right, and non-full-bleed images no longer receive a universal overlay or blur.
+- Image sidecars now record actual/original dimensions, upscale status, resolution profile, license status and user-confirmation requirements.
+- Formal enterprise delivery accepts generated or open-license assets; unknown-license web images remain preview-only and fail the delivery gate until replaced/confirmed.
+- A growing project asset library promotes only generated/open-license, privacy-safe assets above a quality floor and dynamic category threshold.
+- Chinese/English typography remains SimSun/Times New Roman, with larger title/body hierarchy and repaired mojibake cleanup rules.
+- Verified kernel smoke: eight-slide expert render, all quality checks passed, PowerPoint 16.0 opened the file without repair and exported all slides to PNG.
+- The detailed implementation/acceptance backlog is in `docs/EXPERT_MODE_IMPROVEMENT_CHECKLIST.md`.
+
 Last updated: 2026-07-14
 
 ## What we are building

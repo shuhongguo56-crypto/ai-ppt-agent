@@ -10,7 +10,7 @@ import subprocess
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib import parse, request as urlrequest
 
@@ -18,6 +18,16 @@ from ai_ppt_contracts import RenderResult, SlideDeck
 from app.ai.errors import ModelGatewayError
 from app.ai.models import ImageRequest
 from app.ai.protocols import ImageGateway
+from app.services.asset_library import promote_asset
+from app.services.composition_library import visual_placement
+from app.services.image_quality import (
+    EXPERT_KEY_PAGE_RESOLUTION,
+    EXPERT_PAGE_RESOLUTION,
+    ImageResolutionRequirement,
+    meets_resolution,
+    raster_dimensions,
+    upscale_with_realesrgan,
+)
 
 
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -64,18 +74,18 @@ FOREGROUND_SAFE_X = 460000
 FOREGROUND_SAFE_TOP = 340000
 FOREGROUND_SAFE_BOTTOM = 430000
 EMU_PER_POINT = 12700
-PPT_COVER_TITLE_MAX = 3300
-PPT_COVER_TITLE_MID = 3050
-PPT_COVER_TITLE_MIN = 2550
-PPT_PAGE_TITLE_MAX = 2900
-PPT_PAGE_TITLE_MID = 2700
-PPT_PAGE_TITLE_MIN = 2300
-PPT_STATEMENT_MAX = 1780
-PPT_STATEMENT_MID = 1620
-PPT_STATEMENT_MIN = 1460
-PPT_CARD_MAX = 1540
-PPT_CARD_MID = 1380
-PPT_CARD_MIN = 1220
+PPT_COVER_TITLE_MAX = 4800
+PPT_COVER_TITLE_MID = 4300
+PPT_COVER_TITLE_MIN = 3600
+PPT_PAGE_TITLE_MAX = 3600
+PPT_PAGE_TITLE_MID = 3300
+PPT_PAGE_TITLE_MIN = 2700
+PPT_STATEMENT_MAX = 2200
+PPT_STATEMENT_MID = 2000
+PPT_STATEMENT_MIN = 1800
+PPT_CARD_MAX = 1800
+PPT_CARD_MID = 1650
+PPT_CARD_MIN = 1500
 REF_DARK = "080A0F"
 REF_PANEL = "111216"
 REF_INK = "F8F3E7"
@@ -112,6 +122,12 @@ class VisualAsset:
     prompt: str
     provider_chain: list[str]
     attribution: str | None = None
+    width: int | None = None
+    height: int | None = None
+    original_width: int | None = None
+    original_height: int | None = None
+    upscaled: bool = False
+    resolution_profile: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +155,15 @@ def render_slide_deck(
     image_resolution_mode: str = "auto",
     image_search_enabled: bool = True,
     image_search_timeout_seconds: float | None = None,
+    expert_mode: bool = False,
+    expert_image_min_long_edge: int = 1920,
+    expert_image_min_short_edge: int = 1080,
+    expert_key_image_min_long_edge: int = 3840,
+    expert_key_image_min_short_edge: int = 2160,
+    realesrgan_executable: Path | None = None,
+    realesrgan_model: str = "realesrgan-x4plus",
+    realesrgan_timeout_seconds: float = 180,
+    shared_asset_library_path: Path | None = None,
 ) -> RenderResult:
     render_dir = output_root / "renders" / deck.project_id / f"slide-deck-v{slide_deck_version}"
     render_dir.mkdir(parents=True, exist_ok=True)
@@ -151,6 +176,15 @@ def render_slide_deck(
         mode=image_resolution_mode,
         image_search_enabled=image_search_enabled,
         image_search_timeout_seconds=image_search_timeout_seconds,
+        expert_mode=expert_mode,
+        expert_image_min_long_edge=expert_image_min_long_edge,
+        expert_image_min_short_edge=expert_image_min_short_edge,
+        expert_key_image_min_long_edge=expert_key_image_min_long_edge,
+        expert_key_image_min_short_edge=expert_key_image_min_short_edge,
+        realesrgan_executable=realesrgan_executable,
+        realesrgan_model=realesrgan_model,
+        realesrgan_timeout_seconds=realesrgan_timeout_seconds,
+        shared_asset_library_path=shared_asset_library_path,
     )
     _write_pptx(deck, pptx_path, visual_assets)
     _write_hyperframes_html(deck, html_path, visual_assets)
@@ -186,6 +220,15 @@ def resolve_visual_assets(
     mode: str = "auto",
     image_search_enabled: bool = True,
     image_search_timeout_seconds: float | None = None,
+    expert_mode: bool = False,
+    expert_image_min_long_edge: int = 1920,
+    expert_image_min_short_edge: int = 1080,
+    expert_key_image_min_long_edge: int = 3840,
+    expert_key_image_min_short_edge: int = 2160,
+    realesrgan_executable: Path | None = None,
+    realesrgan_model: str = "realesrgan-x4plus",
+    realesrgan_timeout_seconds: float = 180,
+    shared_asset_library_path: Path | None = None,
 ) -> dict[int, VisualAsset]:
     assets_dir = render_dir / "assets"
     assets_dir.mkdir(parents=True, exist_ok=True)
@@ -205,6 +248,7 @@ def resolve_visual_assets(
             mode=mode,
             image_search_enabled=image_search_enabled,
             image_search_timeout_seconds=image_search_timeout_seconds,
+            expert_mode=expert_mode,
         )
         return slide.slide_index, asset
 
@@ -334,7 +378,26 @@ def resolve_visual_assets(
                 composition_archetype=slide.design_plan.composition_archetype,
                 palette=deck.theme.palette,
             )
+        asset = _upgrade_visual_asset_for_expert_delivery(
+            asset,
+            slide=slide,
+            expert_mode=expert_mode,
+            normal_requirement=ImageResolutionRequirement(
+                expert_image_min_long_edge,
+                expert_image_min_short_edge,
+                EXPERT_PAGE_RESOLUTION.label,
+            ),
+            key_requirement=ImageResolutionRequirement(
+                expert_key_image_min_long_edge,
+                expert_key_image_min_short_edge,
+                EXPERT_KEY_PAGE_RESOLUTION.label,
+            ),
+            realesrgan_executable=realesrgan_executable,
+            realesrgan_model=realesrgan_model,
+            realesrgan_timeout_seconds=realesrgan_timeout_seconds,
+        )
         _write_cached_visual_asset(asset, assets_dir)
+        promote_asset(asset, shared_asset_library_path)
         seen_image_hashes.add(_visual_asset_hash(asset.path))
         assets[slide.slide_index] = asset
     return assets
@@ -432,6 +495,7 @@ def _resolve_visual_asset_candidate(
     mode: str,
     image_search_enabled: bool,
     image_search_timeout_seconds: float | None,
+    expert_mode: bool = False,
 ) -> VisualAsset | None:
     query = image_item.search_query
     asset = None
@@ -456,6 +520,10 @@ def _resolve_visual_asset_candidate(
             enabled=image_search_enabled,
             timeout_seconds=image_search_timeout_seconds,
         )
+    preview_only_asset = None
+    if asset is not None and expert_mode and _visual_asset_license_status(asset.source_type) == "unknown":
+        preview_only_asset = asset
+        asset = None
     if asset is None:
         asset = _generate_visual_asset_with_ai(
             slide.slide_index,
@@ -474,7 +542,7 @@ def _resolve_visual_asset_candidate(
             direction_name=deck.theme.name,
             palette=deck.theme.palette,
         )
-    return asset
+    return asset or preview_only_asset
 
 
 def _image_resolution_worker_count(slide_count: int) -> int:
@@ -565,6 +633,7 @@ def _read_cached_visual_asset(
 
 
 def _write_cached_visual_asset(asset: VisualAsset, assets_dir: Path) -> None:
+    license_status = _visual_asset_license_status(asset.source_type)
     payload = {
         "slide": asset.slide_index,
         "fileName": asset.file_name,
@@ -578,6 +647,14 @@ def _write_cached_visual_asset(asset: VisualAsset, assets_dir: Path) -> None:
         "providerChain": asset.provider_chain,
         "attribution": asset.attribution,
         "contentHash": _visual_asset_hash(asset.path),
+        "width": asset.width,
+        "height": asset.height,
+        "originalWidth": asset.original_width,
+        "originalHeight": asset.original_height,
+        "upscaled": asset.upscaled,
+        "resolutionProfile": asset.resolution_profile,
+        "licenseStatus": license_status,
+        "requiresUserConfirmation": license_status == "unknown",
     }
     try:
         _asset_sidecar_path(assets_dir, asset.slide_index).write_text(
@@ -586,6 +663,88 @@ def _write_cached_visual_asset(asset: VisualAsset, assets_dir: Path) -> None:
         )
     except OSError:
         return
+
+
+def _visual_asset_license_status(source_type: str) -> str:
+    if source_type in {"ai_fallback", "free_ai_fallback"}:
+        return "generated"
+    if source_type in {"openverse_search", "wikimedia_commons_search"}:
+        return "open-license"
+    return "unknown"
+
+
+def _upgrade_visual_asset_for_expert_delivery(
+    asset: VisualAsset,
+    *,
+    slide,
+    expert_mode: bool,
+    normal_requirement: ImageResolutionRequirement,
+    key_requirement: ImageResolutionRequirement,
+    realesrgan_executable: Path | None,
+    realesrgan_model: str,
+    realesrgan_timeout_seconds: float,
+) -> VisualAsset:
+    dimensions = raster_dimensions(asset.path)
+    if dimensions is None:
+        return asset
+    original_width, original_height = dimensions
+    if not expert_mode:
+        return replace(
+            asset,
+            width=original_width,
+            height=original_height,
+            original_width=original_width,
+            original_height=original_height,
+        )
+    key_page = slide.slide_index == 1 or slide.design_plan.composition_archetype in {
+        "manifesto_close",
+        "future_horizon",
+        "closing_echo",
+    }
+    requirement = key_requirement if key_page else normal_requirement
+    if meets_resolution(dimensions, requirement):
+        return replace(
+            asset,
+            width=original_width,
+            height=original_height,
+            original_width=original_width,
+            original_height=original_height,
+            resolution_profile=requirement.label,
+        )
+    destination = asset.path.with_name(f"slide-{asset.slide_index}-upscaled.png")
+    upscaled_dimensions = upscale_with_realesrgan(
+        asset.path,
+        destination,
+        executable=realesrgan_executable,
+        requirement=requirement,
+        model=realesrgan_model,
+        timeout_seconds=realesrgan_timeout_seconds,
+    )
+    if upscaled_dimensions is None:
+        return replace(
+            asset,
+            width=original_width,
+            height=original_height,
+            original_width=original_width,
+            original_height=original_height,
+            resolution_profile=requirement.label,
+        )
+    width, height = upscaled_dimensions
+    attribution = asset.attribution or "Visual asset"
+    return replace(
+        asset,
+        path=destination,
+        rel_path=f"assets/{destination.name}",
+        file_name=destination.name,
+        mime_type="image/png",
+        attribution=f"{attribution} / enhanced locally with Real-ESRGAN",
+        width=width,
+        height=height,
+        original_width=original_width,
+        original_height=original_height,
+        upscaled=True,
+        resolution_profile=requirement.label,
+    )
 
 
 def _search_open_visual_asset(
@@ -605,10 +764,10 @@ def _search_open_visual_asset(
     deadline = time.monotonic() + _image_search_budget(timeout_seconds)
     for candidate_query in _image_search_queries(query, image_type)[:4]:
         for searcher in (
-            _search_bing_visual_asset,
             _search_openverse_visual_asset,
-            _search_wikipedia_page_visual_asset,
             _search_commons_visual_asset,
+            _search_wikipedia_page_visual_asset,
+            _search_bing_visual_asset,
         ):
             if time.monotonic() > deadline:
                 return None
@@ -2160,7 +2319,7 @@ def _clean_visible_text(value: str, *, role: str = "body", clip: bool = True) ->
     text = text.replace("\ufffd", "")
     text = re.sub(r"\s+", " ", text).strip()
     text = re.sub(r"^AI\s*可以指\s*[：:]\s*", "", text, flags=re.IGNORECASE).strip()
-    text = re.sub(r"^AI\s*鍙\S{0,8}\s*[锛：:]\s*", "", text, flags=re.IGNORECASE).strip()
+    text = re.sub(r"^AI\s*(?:是指|指的是)\s*[：:]\s*", "", text, flags=re.IGNORECASE).strip()
     text = _strip_visible_outline_scaffold(text)
     if not text:
         return ""
@@ -2273,9 +2432,9 @@ def _required_text_cy(text: str, cx: int, font_size: int, role: str, inset_x: in
 
 def _minimum_font_size(role: str) -> int:
     if role == "title":
-        return 1850
+        return PPT_PAGE_TITLE_MIN
     if role == "subtitle":
-        return 1080
+        return 1300
     if role == "card":
         return PPT_CARD_MIN
     return 1000
@@ -2340,6 +2499,7 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
             )
         blocks = "\n".join(block_items[:4])
         plan = slide.design_plan
+        placement = visual_placement(plan.composition_archetype)
         slide_bg, slide_fg, slide_accent, slide_soft, _slide_red, _slide_blue = _slide_visual_palette(
             deck.theme.palette,
             slide,
@@ -2356,8 +2516,8 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
         subtitle = _clean_visible_text(slide.subtitle, role="subtitle")
         slides.append(
             f"""
-            <section class="frame frame-{html.escape(slide.layout)} composition-{html.escape(plan.composition_archetype)} treatment-{html.escape(plan.image_treatment)} motion-{html.escape(plan.motion_preset)}" style="{slide_style}" data-slide="{slide.slide_index}" data-active="{"true" if slide.slide_index == 1 else "false"}" data-motion-engine="HyperFrames" data-reference-style="cinematic-full-bleed" data-composition-archetype="{html.escape(plan.composition_archetype)}" data-composition-variant="{html.escape(plan.composition_variant)}" data-image-treatment="{html.escape(plan.image_treatment)}" data-motion-preset="{html.escape(plan.motion_preset)}" data-content-density="{html.escape(plan.content_density)}" data-asset-role="{html.escape(plan.asset_role)}">
-              <div class="frame-inner" data-reference-style="cinematic-full-bleed">
+            <section class="frame frame-{html.escape(slide.layout)} composition-{html.escape(plan.composition_archetype)} treatment-{html.escape(plan.image_treatment)} motion-{html.escape(plan.motion_preset)}" style="{slide_style}" data-slide="{slide.slide_index}" data-active="{"true" if slide.slide_index == 1 else "false"}" data-motion-engine="HyperFrames" data-reference-style="content-driven-composition" data-visual-mode="{html.escape(placement.mode)}" data-visual-gravity="{html.escape(placement.gravity)}" data-composition-archetype="{html.escape(plan.composition_archetype)}" data-composition-variant="{html.escape(plan.composition_variant)}" data-image-treatment="{html.escape(plan.image_treatment)}" data-motion-preset="{html.escape(plan.motion_preset)}" data-content-density="{html.escape(plan.content_density)}" data-asset-role="{html.escape(plan.asset_role)}">
+              <div class="frame-inner" data-reference-style="content-driven-composition">
                 {asset_html}
                 {explainer_html}
                 <h1>{html.escape(title)}</h1>
@@ -2570,6 +2730,11 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
         radial-gradient(circle at 18% 78%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 32%),
         radial-gradient(circle at 82% 28%, color-mix(in srgb, var(--soft) 24%, transparent), transparent 34%);
     }}
+    .frame[data-visual-mode="window"] .frame-inner::before,
+    .frame[data-visual-mode="strip"] .frame-inner::before,
+    .frame[data-visual-mode="edge_panel"] .frame-inner::before {{
+      background: none;
+    }}
     .frame-inner::after {{
       content: "";
       position: absolute;
@@ -2636,12 +2801,7 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
       transform-origin: 70% 45%;
     }}
     .frame-asset::after {{
-      content: "";
-      position: absolute;
-      inset: 0;
-      background:
-        linear-gradient(180deg, color-mix(in srgb, var(--bg) 10%, transparent), color-mix(in srgb, var(--bg) 46%, transparent)),
-        radial-gradient(circle at 65% 42%, transparent 0 28%, color-mix(in srgb, var(--bg) 28%, transparent) 65%, color-mix(in srgb, var(--bg) 78%, transparent) 100%);
+      display: none;
     }}
     .frame-asset img {{ display: block; width: 100%; height: 100%; aspect-ratio: auto; object-fit: cover; filter: saturate(1.12) contrast(1.08) brightness(.98); transform: scale(1.018); }}
     .frame-asset figcaption {{
@@ -2668,11 +2828,10 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
       transform: none;
     }}
     .treatment-split_crop .frame-asset {{ border-radius: 28px; }}
-    .treatment-split_crop .frame-asset::after {{ background: linear-gradient(90deg, rgba(8,10,15,.88), rgba(8,10,15,.06) 34%, rgba(8,10,15,.18)); }}
     .treatment-masked_window .frame-asset {{ border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent); border-radius: 28px; box-shadow: 0 28px 80px rgba(0,0,0,.42); }}
     .treatment-layered_cutout .frame-asset {{ border: 1px solid rgba(255,255,255,.24); border-radius: 36px; transform: none; box-shadow: -14px 18px 0 color-mix(in srgb, var(--accent) 12%, transparent), 0 36px 90px rgba(0,0,0,.48); }}
     .treatment-evidence_strip .frame-asset {{ border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent); border-radius: 24px; }}
-    .treatment-atmospheric_backdrop .frame-asset img {{ filter: saturate(.74) contrast(1.08) brightness(.66) blur(1px); transform: scale(1.035); }}
+    .treatment-atmospheric_backdrop .frame-asset img {{ filter: saturate(.96) contrast(1.06) brightness(.92); transform: scale(1.018); }}
     .block {{ position: relative; overflow: visible; min-width: 0; min-height: 104px; display: grid; align-content: center; padding: 18px; border-radius: 16px; background: color-mix(in srgb, var(--bg) 91%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); box-shadow: 0 14px 34px rgba(0,0,0,.24); }}
     .block::after {{ content: ""; position: absolute; inset: auto -30px -45px auto; width: 110px; height: 110px; border-radius: 999px; background: var(--accent); opacity: .10; }}
     .block p {{ display: block; overflow: visible; font-size: var(--type-card); line-height: 1.38; margin: 0; }}
@@ -2838,15 +2997,6 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
       margin-top: 0 !important;
       margin-bottom: 24px !important;
     }}
-    .frame-asset {{
-      inset: 10% 5% 10% var(--image-left) !important;
-      z-index: 0 !important;
-      min-height: auto !important;
-      border-radius: 28px !important;
-      border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent) !important;
-      box-shadow: 0 28px 80px rgba(0,0,0,.38) !important;
-      transform: none !important;
-    }}
     .frame-asset figcaption {{
       display: none !important;
     }}
@@ -2933,7 +3083,7 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
     }}
     .frame.frame > .frame-inner > h1 {{
       overflow: visible !important;
-      font-family: "Times New Roman", SimSun, "瀹嬩綋", serif !important;
+      font-family: "Times New Roman", SimSun, "宋体", serif !important;
       font-size: var(--type-title) !important;
       line-height: 1.14 !important;
     }}
@@ -2975,7 +3125,7 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
       --frame-overlay: linear-gradient(270deg, color-mix(in srgb, var(--bg) 94%, transparent) 0 43%, color-mix(in srgb, var(--bg) 24%, transparent) 70%, color-mix(in srgb, var(--bg) 8%, transparent));
     }}
     .composition-architectural_cover {{
-      --content-w: 66%; --content-left: 3%; --asset-inset: 47% 5% 6% 37%; --asset-radius: 26px;
+      --content-w: 66%; --content-left: 3%; --asset-inset: 10% 5% 58% 35%; --asset-radius: 26px;
       --frame-overlay: linear-gradient(180deg, color-mix(in srgb, var(--bg) 92%, transparent) 0 42%, color-mix(in srgb, var(--bg) 22%, transparent) 72%, color-mix(in srgb, var(--bg) 52%, transparent));
     }}
     .composition-chapter_index {{
@@ -2983,7 +3133,7 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
       --frame-overlay: linear-gradient(90deg, color-mix(in srgb, var(--bg) 96%, transparent) 0 58%, color-mix(in srgb, var(--bg) 40%, transparent) 83%, color-mix(in srgb, var(--bg) 18%, transparent));
     }}
     .composition-editorial_split {{
-      --content-w: 44%; --content-left: 54%; --asset-inset: 0;
+      --content-w: 44%; --content-left: 54%; --asset-inset: 0 56% 0 0; --asset-radius: 0;
       --frame-overlay: linear-gradient(270deg, color-mix(in srgb, var(--bg) 96%, transparent) 0 45%, color-mix(in srgb, var(--bg) 32%, transparent) 68%, color-mix(in srgb, var(--bg) 12%, transparent));
     }}
     .composition-diagonal_story {{ --content-w: 58%; --content-left: 2%; --asset-inset: 0; }}
@@ -2992,14 +3142,14 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
       --frame-overlay: radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--bg) 72%, transparent), color-mix(in srgb, var(--bg) 92%, transparent));
     }}
     .composition-proof_mosaic {{ --content-w: 52%; --content-left: 0%; --asset-inset: 18% 5% 13% 58%; --asset-radius: 24px; }}
-    .composition-data_landscape {{ --content-w: 92%; --content-left: 4%; --asset-inset: 12% 5% 56% 65%; --asset-radius: 22px; }}
-    .composition-process_ribbon {{ --content-w: 92%; --content-left: 4%; --asset-inset: 11% 5% 56% 56%; --asset-radius: 22px; }}
+    .composition-data_landscape {{ --content-w: 62%; --content-left: 0%; --asset-inset: 8% 5% 76% 66%; --asset-radius: 20px; }}
+    .composition-process_ribbon {{ --content-w: 90%; --content-left: 5%; --asset-inset: 22% 5% 64% 5%; --asset-radius: 20px; }}
     .composition-system_map {{
       --content-w: 88%; --content-left: 6%; --asset-inset: 30% 36% 25% 36%; --asset-radius: 999px;
       --frame-overlay: radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--bg) 22%, transparent), color-mix(in srgb, var(--bg) 88%, transparent) 40%, color-mix(in srgb, var(--bg) 96%, transparent));
     }}
-    .composition-split_comparison {{ --content-w: 92%; --content-left: 4%; --asset-inset: 0; }}
-    .composition-priority_stack {{ --content-w: 73%; --content-left: 0%; --asset-inset: 16% 5% 14% 80%; --asset-radius: 22px; }}
+    .composition-split_comparison {{ --content-w: 92%; --content-left: 4%; --asset-inset: 39% 45% 34% 45%; --asset-radius: 999px; }}
+    .composition-priority_stack {{ --content-w: 73%; --content-left: 0%; --asset-inset: 11% 4% 10% 79%; --asset-radius: 22px; }}
     .composition-closing_echo,
     .composition-manifesto_close,
     .composition-future_horizon {{
@@ -3009,7 +3159,7 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
 
     .composition-proof_mosaic .blocks {{ grid-template-columns: 1fr 1fr !important; }}
     .composition-proof_mosaic .block:first-child {{ grid-column: 1 / -1 !important; }}
-    .composition-data_landscape .blocks {{ grid-template-columns: 1.3fr repeat(3, .7fr) !important; }}
+    .composition-data_landscape .blocks {{ grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }}
     .composition-process_ribbon .frame-inner > .blocks {{
       position: absolute !important;
       left: 4% !important; right: 4% !important; bottom: 7% !important;
@@ -3079,7 +3229,7 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
     }}
   </style>
 </head>
-<body data-notes="false" data-hyperframes-renderer="local" data-motion-engine="HyperFrames" data-deck-contract="SlideDeck JSON" data-reference-style="cinematic-full-bleed" data-design-system="{html.escape(deck.theme.design_system_id)}">
+<body data-notes="false" data-hyperframes-renderer="local" data-motion-engine="HyperFrames" data-deck-contract="SlideDeck JSON" data-reference-style="content-driven-composition" data-design-system="{html.escape(deck.theme.design_system_id)}">
   <div class="chrome">
     <div class="brand"><strong>AI PPT Agent</strong><span>{html.escape(deck.project_id)}</span></div>
     <div class="controls">
@@ -3633,83 +3783,41 @@ def _cinematic_backdrop_shapes(
 ) -> str:
     plan = slide.design_plan
     archetype = plan.composition_archetype
+    placement = visual_placement(archetype)
     visual = (
         _image_pic_shape(
             201,
             "rId3",
-            0,
-            0,
-            SLIDE_CX,
-            SLIDE_CY,
+            placement.x,
+            placement.y,
+            placement.cx,
+            placement.cy,
             visual_asset.alt,
             rounded=False,
-            name="Reference Full-Bleed Visual",
+            name=f"Content Visual {placement.gravity}",
         )
-        if visual_asset is not None
+        if visual_asset is not None and placement.mode == "full_bleed"
         else ""
     )
-    overlay_alpha = {
-        "cinematic_hero": 56000,
-        "editorial_cover": 70000,
-        "architectural_cover": 68000,
-        "chapter_index": 78000,
-        "editorial_split": 76000,
-        "diagonal_story": 72000,
-        "statement_focus": 66000,
-        "proof_mosaic": 90000,
-        "data_landscape": 89000,
-        "process_ribbon": 88000,
-        "system_map": 88000,
-        "split_comparison": 80000,
-        "priority_stack": 88000,
-        "manifesto_close": 57000,
-        "future_horizon": 57000,
-        "closing_echo": 57000,
-    }.get(archetype, 84000)
-    reading_geometry = {
-        "cinematic_hero": (0, 0, 6840000, SLIDE_CY, 82000),
-        "editorial_cover": (0, 0, 6240000, SLIDE_CY, 90000),
-        "architectural_cover": (0, 2800000, 9300000, 4058000, 86000),
-        "chapter_index": (0, 0, SLIDE_CX, SLIDE_CY, 45000),
-        "editorial_split": (0, 0, SLIDE_CX, SLIDE_CY, 42000),
-        "diagonal_story": (0, 0, 6500000, SLIDE_CY, 62000),
-        "statement_focus": (0, 0, SLIDE_CX, SLIDE_CY, 36000),
-        "proof_mosaic": (0, 0, 6700000, SLIDE_CY, 94000),
-        "data_landscape": (0, 0, 7600000, SLIDE_CY, 92000),
-        "process_ribbon": (0, 0, SLIDE_CX, SLIDE_CY, 42000),
-        "system_map": (0, 0, SLIDE_CX, SLIDE_CY, 48000),
-        "split_comparison": (0, 0, SLIDE_CX, SLIDE_CY, 52000),
-        "priority_stack": (0, 0, 9300000, SLIDE_CY, 90000),
-        "manifesto_close": (0, 0, SLIDE_CX, SLIDE_CY, 36000),
-        "future_horizon": (0, 0, SLIDE_CX, SLIDE_CY, 36000),
-        "closing_echo": (0, 0, SLIDE_CX, SLIDE_CY, 36000),
-    }.get(archetype, (0, 0, 7200000, SLIDE_CY, 84000))
-    reading_x, reading_y, reading_cx, reading_cy, reading_alpha = reading_geometry
+    reading_vignette = ""
+    if placement.mode == "full_bleed" and placement.reading_zone is not None:
+        reading_x, reading_y, reading_cx, reading_cy = placement.reading_zone
+        reading_vignette = _alpha_rect_shape(
+            203,
+            reading_x,
+            reading_y,
+            reading_cx,
+            reading_cy,
+            bg,
+            76000,
+            name=f"Localized Reading Zone {placement.gravity}",
+        )
     treatment_visual = _treatment_pic_shape(slide, visual_asset)
     ornaments = _page_backdrop_ornaments(slide, accent, soft, red, blue)
     return "\n".join(
         [
             visual,
-            _alpha_rect_shape(
-                202,
-                0,
-                0,
-                SLIDE_CX,
-                SLIDE_CY,
-                bg,
-                overlay_alpha,
-                name="Reference Cinematic Overlay",
-            ),
-            _alpha_rect_shape(
-                203,
-                reading_x,
-                reading_y,
-                reading_cx,
-                reading_cy,
-                bg,
-                reading_alpha,
-                name="Reference Reading Vignette",
-            ),
+            reading_vignette,
             ornaments,
             treatment_visual,
             _alpha_rect_shape(
@@ -3720,7 +3828,10 @@ def _cinematic_backdrop_shapes(
                 1000,
                 accent,
                 0,
-                name=f"Page Plan {plan.composition_archetype} {plan.composition_variant} {plan.image_treatment}",
+                name=(
+                    f"Page Plan {plan.composition_archetype} {plan.composition_variant} "
+                    f"{plan.image_treatment} {placement.mode} {placement.gravity}"
+                ),
             ),
             _alpha_rect_shape(
                 220,
@@ -3784,40 +3895,19 @@ def _treatment_pic_shape(slide, visual_asset: VisualAsset | None) -> str:
         return ""
     archetype = slide.design_plan.composition_archetype
     image_treatment = slide.design_plan.image_treatment
-    # Full-canvas editorial layouts use the already embedded background image;
-    # windowed layouts reserve a content-safe, archetype-specific picture zone.
-    if archetype in {
-        "chapter_index",
-        "editorial_split",
-        "diagonal_story",
-        "statement_focus",
-        "split_comparison",
-        "manifesto_close",
-        "future_horizon",
-        "closing_echo",
-    }:
+    placement = visual_placement(archetype)
+    if placement.mode == "full_bleed":
         return ""
-    geometry = {
-        "cinematic_hero": (6900000, 650000, 4650000, 5100000, True),
-        "editorial_cover": (6960000, 720000, 4520000, 4400000, True),
-        "architectural_cover": (7600000, 760000, 3620000, 2280000, True),
-        "proof_mosaic": (7040000, 1320000, 4260000, 4240000, True),
-        "data_landscape": (7920000, 1680000, 3380000, 1860000, True),
-        "process_ribbon": (7200000, 1420000, 4100000, 1720000, True),
-        "system_map": (4440000, 2050000, 3320000, 3000000, True),
-        "priority_stack": (9740000, 1260000, 1560000, 4320000, True),
-    }.get(archetype, (6900000, 760000, 4620000, 4680000, True))
-    x, y, cx, cy, rounded = geometry
     return _image_pic_shape(
         218,
         "rId3",
-        x,
-        y,
-        cx,
-        cy,
+        placement.x,
+        placement.y,
+        placement.cx,
+        placement.cy,
         visual_asset.alt,
-        rounded=rounded,
-        name=f"Page Visual {image_treatment}",
+        rounded=placement.rounded,
+        name=f"Page Visual {image_treatment} {placement.gravity}",
     )
 
 
@@ -4107,7 +4197,7 @@ def _layout_shapes(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
         "editorial_cover": _editorial_cover_layout,
         "architectural_cover": _architectural_cover_layout,
         "chapter_index": _chapter_index_layout,
-        "editorial_split": _two_column_layout,
+        "editorial_split": _editorial_split_layout,
         "diagonal_story": _diagonal_story_layout,
         "statement_focus": _statement_focus_layout,
         "proof_mosaic": _proof_mosaic_layout,
@@ -4301,14 +4391,14 @@ def _ppt_title_font_size(text: str, *, cover: bool = False) -> int:
         if weight <= 40:
             return PPT_COVER_TITLE_MID
         if weight <= 54:
-            return 2800
+            return 3900
         return PPT_COVER_TITLE_MIN
     if weight <= 22:
         return PPT_PAGE_TITLE_MAX
     if weight <= 34:
         return PPT_PAGE_TITLE_MID
     if weight <= 48:
-        return 2500
+        return 3000
     return PPT_PAGE_TITLE_MIN
 
 
@@ -4318,7 +4408,7 @@ def _ppt_statement_font_size(text: str, *, compact: bool = False) -> int:
         if weight <= 32:
             return PPT_STATEMENT_MID
         if weight <= 48:
-            return 1520
+            return 1850
         return PPT_STATEMENT_MIN
     if weight <= 36:
         return PPT_STATEMENT_MAX
@@ -4343,7 +4433,7 @@ def _premium_statement_copy(value: str) -> str:
                 text = head
                 break
     limit = 34 if _contains_cjk(text) else 82
-    return _smart_clip_visible_text(text, limit).strip(" \t\r\n锛屻€傦紱锛氥€?:;-鈥斺€?")
+    return _smart_clip_visible_text(text, limit).strip(" \t\r\n，。；：、?:;—–-)")
 
 
 def _premium_card_copy(value: str) -> str:
@@ -4357,7 +4447,7 @@ def _premium_card_copy(value: str) -> str:
                 break
     limit = 20 if _contains_cjk(text) else 54
     cleaned = _strip_terminal_ellipsis(
-        _smart_clip_visible_text(text, limit).strip(" \t\r\n锛屻€傦紱锛氥€?:;-鈥斺€?")
+        _smart_clip_visible_text(text, limit).strip(" \t\r\n，。；：、?:;—–-)")
     )
     return "" if _is_low_information_card(cleaned) else cleaned
 
@@ -4388,7 +4478,7 @@ def _is_low_information_card(value: str) -> bool:
 
 
 def _strip_terminal_ellipsis(value: str) -> str:
-    return str(value).rstrip(" .…鈥?").strip(" \t\r\n锛屻€傦紱锛氥€?:;-鈥斺€?")
+    return str(value).rstrip(" .…").strip(" \t\r\n，。；：、?:;—–-)")
 
 
 def _premium_card_shape(
@@ -4443,11 +4533,39 @@ def _editorial_cover_layout(slide, blocks: list, fg: str, accent: str, soft: str
     support = blocks[1].content if len(blocks) > 1 else slide.speaker_notes
     return "\n".join(
         [
-            _rect_shape(120, 720000, 760000, 900000, 48000, accent),
-            _text_shape(121, _ppt_title_text(slide.title), 720000, 1040000, 5600000, 1900000, _ppt_title_font_size(_ppt_title_text(slide.title), cover=True), fg, bold=True),
-            _text_shape(122, slide.subtitle or lead, 760000, 3060000, 4700000, 620000, 1750, accent, bold=True),
-            _card_shape(123, lead, 760000, 3940000, 4700000, 820000, soft, fg, accent),
-            _text_shape(124, support, 7900000, 5150000, 3300000, 520000, 1350, fg, align="r"),
+            _rect_shape(120, 6200000, 760000, 900000, 48000, accent),
+            _text_shape(121, _ppt_title_text(slide.title), 6200000, 1040000, 5250000, 1900000, _ppt_title_font_size(_ppt_title_text(slide.title), cover=True), fg, bold=True),
+            _text_shape(122, slide.subtitle or lead, 6240000, 3060000, 5100000, 620000, 1750, accent, bold=True),
+            _card_shape(123, lead, 6240000, 3940000, 5100000, 820000, soft, fg, accent),
+            _text_shape(124, support, 6240000, 5150000, 5100000, 520000, 1350, fg, align="r"),
+        ]
+    )
+
+
+def _editorial_split_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
+    lead = blocks[0].content if blocks else slide.visual_intent
+    support = blocks[1:4] or blocks[:1]
+    cards = "\n".join(
+        _card_shape(
+            136 + index,
+            block.content,
+            6460000,
+            3500000 + index * 760000,
+            4900000,
+            620000,
+            soft,
+            fg,
+            accent,
+        )
+        for index, block in enumerate(support[:3])
+    )
+    return "\n".join(
+        [
+            _rect_shape(130, 6460000, 680000, 760000, 42000, accent),
+            _text_shape(131, _ppt_title_text(slide.title), 6460000, 970000, 4900000, 1300000, _ppt_title_font_size(_ppt_title_text(slide.title)), fg, bold=True),
+            (_text_shape(132, slide.subtitle, 6480000, 2350000, 4850000, 420000, 1500, accent, bold=True) if slide.subtitle else ""),
+            _text_shape(133, lead, 6480000, 2860000, 4850000, 480000, 1650, fg, bold=True),
+            cards,
         ]
     )
 
@@ -4519,7 +4637,13 @@ def _proof_mosaic_layout(slide, blocks: list, fg: str, accent: str, soft: str) -
         _card_shape(160 + index, block.content, *positions[index], soft, fg, accent)
         for index, block in enumerate(cards[:4])
     ]
-    return "\n".join([_title_and_subtitle(slide, fg, title_y=420000, title_size=2900), *shapes])
+    return "\n".join(
+        [
+            _text_shape(5, _ppt_title_text(slide.title), 700000, 420000, 6100000, 920000, _ppt_title_font_size(_ppt_title_text(slide.title)), fg, bold=True),
+            (_text_shape(7, slide.subtitle, 720000, 1280000, 6000000, 340000, 1500, fg) if slide.subtitle else ""),
+            *shapes,
+        ]
+    )
 
 
 def _system_map_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
@@ -4556,11 +4680,11 @@ def _split_comparison_layout(slide, blocks: list, fg: str, accent: str, soft: st
     return "\n".join(
         [
             _title_and_subtitle(slide, fg, title_y=390000, title_size=2900),
-            _shape(175, "roundRect", 720000, 1900000, 5100000, 3500000, "153B73", alpha=52000, line=accent),
-            _shape(176, "roundRect", 6470000, 1900000, 5000000, 3500000, "6E2020", alpha=52000, line=accent),
-            _text_shape(177, left_text, 1150000, 2600000, 4200000, 1950000, 1900, fg, bold=True),
-            _text_shape(178, right_text, 6900000, 2600000, 4100000, 1950000, 1900, fg, bold=True),
-            _shape(179, "ellipse", 5920000, 3170000, 360000, 360000, accent),
+            _shape(175, "roundRect", 720000, 1900000, 4700000, 3500000, "153B73", alpha=52000, line=accent),
+            _shape(176, "roundRect", 6770000, 1900000, 4700000, 3500000, "6E2020", alpha=52000, line=accent),
+            _text_shape(177, left_text, 1120000, 2600000, 3900000, 1950000, 1900, fg, bold=True),
+            _text_shape(178, right_text, 7170000, 2600000, 3900000, 1950000, 1900, fg, bold=True),
+            _shape(179, "ellipse", 5860000, 3170000, 360000, 360000, accent),
         ]
     )
 
@@ -4686,7 +4810,8 @@ def _chart_focus_layout(slide, blocks: list, fg: str, accent: str, soft: str) ->
     )
     return "\n".join(
         [
-            _title_and_subtitle(slide, fg, title_y=430000, title_size=2900),
+            _text_shape(5, _ppt_title_text(slide.title), 700000, 430000, 6900000, 920000, _ppt_title_font_size(_ppt_title_text(slide.title)), fg, bold=True),
+            (_text_shape(7, slide.subtitle, 720000, 1290000, 6900000, 320000, 1500, fg) if slide.subtitle else ""),
             _shape(80, "roundRect", 720000, 1900000, 6500000, 3600000, soft, alpha=23000, line=accent),
             _text_shape(82, insight, 1120000, 2580000, 5200000, 620000, 1800, fg, bold=True),
             bars,
@@ -4878,9 +5003,9 @@ def _card_font_size(content: str, cx: int, cy: int) -> int:
     else:
         size = PPT_CARD_MAX
     if narrow:
-        size = min(size, 1220)
+        size = min(size, 1550)
     if compact:
-        size = min(size, 1240)
+        size = min(size, 1550)
     return size
 
 

@@ -8,6 +8,7 @@ from urllib.parse import quote
 import httpx
 
 from .errors import ModelGatewayError, run_provider_operation
+from .image_dimensions import read_raster_dimensions
 from .models import GeneratedImage, ImageRequest
 from .png_validator import DEFAULT_MAX_FILE_BYTES, PNGValidationError, validate_png_bytes
 
@@ -363,12 +364,16 @@ def _safe_generated_image(
     detected = _mime_from_bytes(data)
     if detected not in SUPPORTED_IMAGE_MIME_TYPES:
         raise _validation_error()
+    dimensions = read_raster_dimensions(data)
+    if dimensions is None:
+        raise _validation_error()
+    width, height = dimensions
     if detected == "image/png":
         try:
             validate_png_bytes(
                 data,
-                expected_width=request.width,
-                expected_height=request.height,
+                expected_width=width,
+                expected_height=height,
                 max_file_bytes=DEFAULT_MAX_FILE_BYTES,
             )
         except PNGValidationError:
@@ -376,8 +381,8 @@ def _safe_generated_image(
     return GeneratedImage(
         bytes=data,
         mime_type=detected or mime_type,
-        width=request.width,
-        height=request.height,
+        width=width,
+        height=height,
         model=model,
     )
 
