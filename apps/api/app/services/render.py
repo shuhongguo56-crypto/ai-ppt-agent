@@ -303,6 +303,16 @@ def resolve_visual_assets(
                     asset = generated_asset
                     break
         if asset is None:
+            asset = _recover_prior_version_visual_asset(
+                slide.slide_index,
+                assets_dir,
+                image_type=image_item.image_type,
+                purpose=image_item.purpose,
+                prompt=image_item.prompt,
+                provider_chain=list(image_item.provider_chain),
+                seen_image_hashes=seen_image_hashes,
+            )
+        if asset is None:
             asset = _write_local_visual_asset(
                 slide.slide_index,
                 query,
@@ -321,6 +331,88 @@ def resolve_visual_assets(
         seen_image_hashes.add(_visual_asset_hash(asset.path))
         assets[slide.slide_index] = asset
     return assets
+
+
+def _recover_prior_version_visual_asset(
+    slide_index: int,
+    assets_dir: Path,
+    *,
+    image_type: str,
+    purpose: str,
+    prompt: str,
+    provider_chain: list[str],
+    seen_image_hashes: set[str],
+) -> VisualAsset | None:
+    """Reuse a real, semantically identical asset from an earlier repair pass.
+
+    A quality repair may change layout while keeping the page meaning. If a
+    free provider is temporarily unavailable, a previously accepted image for
+    the same project, slide, image role, and purpose is safer than exporting a
+    vector placeholder. The file is copied into the current version so each
+    render remains self-contained.
+    """
+
+    current_render_dir = assets_dir.parent
+    match = re.fullmatch(r"slide-deck-v(\d+)", current_render_dir.name)
+    if match is None:
+        return None
+    current_version = int(match.group(1))
+    purpose_fingerprint = re.sub(r"\W+", "", purpose.casefold())
+    accepted_sources = {
+        "bing_image_search",
+        "wikipedia_page_image",
+        "wikimedia_commons_search",
+        "openverse_search",
+        "ai_fallback",
+        "free_ai_fallback",
+    }
+    for version in range(current_version - 1, 0, -1):
+        previous_assets = current_render_dir.parent / f"slide-deck-v{version}" / "assets"
+        sidecar = previous_assets / f"slide-{slide_index}-asset.json"
+        try:
+            data = json.loads(sidecar.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if str(data.get("sourceType") or "") not in accepted_sources:
+            continue
+        if str(data.get("imageType") or "") != image_type:
+            continue
+        previous_purpose = re.sub(r"\W+", "", str(data.get("purpose") or "").casefold())
+        if not purpose_fingerprint or previous_purpose != purpose_fingerprint:
+            continue
+        file_name = str(data.get("fileName") or "")
+        if not file_name or Path(file_name).name != file_name:
+            continue
+        source_path = previous_assets / file_name
+        mime_type = str(data.get("mimeType") or "").casefold()
+        if mime_type not in {"image/jpeg", "image/png"} or not source_path.is_file():
+            continue
+        content_hash = _visual_asset_hash(source_path)
+        if not content_hash or content_hash in seen_image_hashes:
+            continue
+        if _image_has_excessive_visible_text(source_path):
+            continue
+        extension = ".jpg" if mime_type == "image/jpeg" else ".png"
+        recovered_name = f"slide-{slide_index}-recovered-v{version}{extension}"
+        recovered_path = assets_dir / recovered_name
+        shutil.copy2(source_path, recovered_path)
+        attribution = str(data.get("attribution") or "Previously accepted project visual")
+        return VisualAsset(
+            slide_index=slide_index,
+            path=recovered_path,
+            rel_path=f"assets/{recovered_name}",
+            file_name=recovered_name,
+            mime_type=mime_type,
+            source_type=str(data["sourceType"]),
+            alt=str(data.get("alt") or _asset_alt(slide_index, str(data.get("query") or ""))),
+            query=str(data.get("query") or ""),
+            image_type=image_type,
+            purpose=purpose,
+            prompt=prompt,
+            provider_chain=provider_chain,
+            attribution=f"{attribution} / recovered from slide-deck-v{version}",
+        )
+    return None
 
 
 def _resolve_visual_asset_candidate(

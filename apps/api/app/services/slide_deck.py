@@ -345,10 +345,7 @@ def repair_slide_deck_for_quality(
             item["searchQuery"] = _clip_text(
                 f'{page_subject} {item["searchQuery"]}', 180
             )
-            item["prompt"] = _clip_text(
-                f'{page_subject}. {item["prompt"]}. No text, no watermark, presentation-ready.',
-                360,
-            )
+            item["prompt"] = _repair_image_prompt(page_subject, item["prompt"])
 
     repairs: list[str] = []
     if text_repair:
@@ -358,6 +355,41 @@ def repair_slide_deck_for_quality(
     if image_repair:
         repairs.append("page_specific_image_intent")
     return SlideDeck(**payload), repairs
+
+
+_AWARD_IMAGE_PROMPT_CONTRACT = (
+    "award-winning corporate presentation standard, judge-ready | "
+    "strong contrast hierarchy with deliberate negative space and a single focal subject | "
+    "protected clean text zone for editable PowerPoint copy | "
+    "no visible text, no labels, no logos, no watermark"
+)
+
+
+def _repair_image_prompt(page_subject: str, original_prompt: str) -> str:
+    """Keep page-specific repair context without clipping away the QA contract.
+
+    Older repair passes prepended the full page subject and then clipped the
+    result from the right. That removed the award-grade clauses and caused
+    every subsequent repair to prepend the same text again. Rebuild a bounded
+    semantic body and always append one canonical contract suffix.
+    """
+
+    contract_markers = (
+        "award-winning corporate presentation standard",
+        "strong contrast hierarchy with deliberate negative space",
+        "protected clean text zone for editable powerpoint copy",
+        "no visible text, no labels, no logos, no watermark",
+    )
+    body = re.sub(r"\s+", " ", str(original_prompt)).strip(" .|")
+    lowered = body.casefold()
+    for marker in contract_markers:
+        index = lowered.find(marker)
+        if index >= 0:
+            body = body[:index].rstrip(" .|")
+            lowered = body.casefold()
+    subject = _clip_text(re.sub(r"\s+", " ", page_subject).strip(), 180)
+    semantic_body = _clip_text(f"{subject} | {body}".strip(" |"), 720)
+    return f"{semantic_body} | {_AWARD_IMAGE_PROMPT_CONTRACT}"
 
 
 def _repair_visible_copy(value: str, limit: int) -> str:

@@ -55,8 +55,8 @@ function Start-LocalApi {
   $env:AI_PPT_IMAGE_SEARCH_ENABLED = "true"
   $env:AI_PPT_POLLINATIONS_IMAGE_ENABLED = "true"
   $env:AI_PPT_POLLINATIONS_IMAGE_MODEL = "flux"
-  $env:AI_PPT_IMAGE_WORKERS = "2"
-  $env:AI_PPT_IMAGE_RETRIES = "3"
+  $env:AI_PPT_IMAGE_RESOLUTION_WORKERS = "2"
+  $env:AI_PPT_IMAGE_GENERATION_RETRY_ROUNDS = "3"
   $env:AI_PPT_TESSDATA_PATH = "D:\Codex\Downloads\tessdata"
   $env:AI_PPT_ALLOWED_ORIGINS = '["https://shuhongguo56-crypto.github.io","https://humanizeppt-studio.almond-gleam-4876.chatgpt.site","http://localhost:3001","http://127.0.0.1:3001"]'
 

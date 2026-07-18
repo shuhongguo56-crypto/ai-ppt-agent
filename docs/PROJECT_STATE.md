@@ -605,3 +605,13 @@ Completed on 2026-07-18:
 - The workflow stores the confirmed visual and assembled SlideDeck in client state immediately, before the slower Image Agent phase begins.
 - The public FastAPI runtime was restarted without changing its established database/assets; the affected latest project remained available and its stale-version retry returned the existing selected direction and 8-slide deck successfully.
 - GitHub Pages was rebuilt and deployed with the recovery client.
+
+## Quality-repair prompt and visual-asset recovery
+
+- Fixed the quality repair loop truncating image prompts from the right at 360 characters. The truncation removed the required `award-winning` and `single focal` clauses, so a deck that initially passed the award-grade contract could fail every later repair.
+- Repaired prompts now keep a bounded page-specific semantic body and always append one canonical award-grade image contract exactly once. Repeated repair passes no longer grow the prompt or remove QA clauses.
+- When search/free generation is temporarily unavailable, the Image Agent now searches earlier SlideDeck versions from the same project and reuses only a real JPEG/PNG from the same slide, image type, and exact semantic purpose. It copies the asset into the current render, rejects duplicates and OCR-risk images, preserves attribution, and still refuses vector placeholders at the delivery gate.
+- Corrected the public runtime environment names to `AI_PPT_IMAGE_RESOLUTION_WORKERS` and `AI_PPT_IMAGE_GENERATION_RETRY_ROUNDS` so the intended two-worker/three-retry policy is actually applied.
+- Failed project `demo-1784386400321` was repaired to SlideDeck v6. Slide 8 recovered the prior accepted Pollinations image instead of `safe_vector_fallback`; all 8 images are distinct JPEG assets.
+- Final quality result: 44/44 passed, including `visual_asset_source_quality`, `award_grade_design_contract`, `competition_ppt_baseline`, `customer_delivery_readiness`, `enterprise_ppt_baseline`, and `visual_asset_uniqueness`.
+- Verification: 361 Python tests passed, TypeScript typecheck passed, and Git whitespace validation passed.

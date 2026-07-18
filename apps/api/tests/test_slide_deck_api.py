@@ -468,6 +468,11 @@ def test_quality_repair_keeps_one_valid_deck_contract_and_increases_visual_varie
         "page_composition_and_motion",
         "page_specific_image_intent",
     ]
+    for item in repaired.image_plan:
+        lowered = item.prompt.casefold()
+        assert "award-winning" in lowered
+        assert "single focal" in lowered
+        assert lowered.count("award-winning corporate presentation standard") == 1
     assert all(len(slide.title) <= 54 for slide in repaired.slides)
     assert all(slide.design_plan.content_density == "sparse" for slide in repaired.slides)
     assert len({slide.design_plan.composition_archetype for slide in repaired.slides}) >= 5
