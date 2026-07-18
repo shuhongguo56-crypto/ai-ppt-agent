@@ -5,6 +5,8 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -19,6 +21,19 @@ from app.ai.protocols import ImageGateway
 
 
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
+OPEN_WEB_TEXT_RISK_TERMS = {
+    "advertisement",
+    "billboard",
+    "branding",
+    "label",
+    "logo",
+    "packaging",
+    "poster",
+    "sign",
+    "signage",
+    "watermark",
+    "wordmark",
+}
 SLIDE_CX = 12192000
 SLIDE_CY = 6858000
 FOREGROUND_SAFE_X = 460000
@@ -180,6 +195,52 @@ def resolve_visual_assets(
             for slide_index, asset in executor.map(resolve_candidate, deck.slides):
                 candidate_assets[slide_index] = asset
 
+    if image_gateway is not None:
+        retry_rounds = _image_generation_retry_rounds()
+        for retry_round in range(1, retry_rounds + 1):
+            missing_slides = [
+                slide for slide in deck.slides if candidate_assets.get(slide.slide_index) is None
+            ]
+            if not missing_slides:
+                break
+            # Free providers commonly throttle the first burst. Let the provider
+            # recover, then retry only missing pages with lower concurrency.
+            time.sleep(1.25 * retry_round)
+
+            def retry_candidate(slide) -> tuple[int, VisualAsset | None]:
+                image_item = image_plan_by_slide[slide.slide_index]
+                asset = _generate_visual_asset_with_ai(
+                    slide.slide_index,
+                    image_item.search_query,
+                    assets_dir,
+                    image_gateway,
+                    image_type=image_item.image_type,
+                    purpose=image_item.purpose,
+                    image_prompt=image_item.prompt,
+                    provider_chain=list(image_item.provider_chain),
+                    slide_title=slide.title,
+                    slide_intent=slide.visual_intent,
+                    asset_role=slide.design_plan.asset_role,
+                    image_treatment=slide.design_plan.image_treatment,
+                    composition_archetype=slide.design_plan.composition_archetype,
+                    direction_name=deck.theme.name,
+                    palette=deck.theme.palette,
+                    variation_hint=(
+                        f"Provider recovery retry {retry_round} for slide {slide.slide_index}; "
+                        "keep the physical scene page-specific and completely free of typography"
+                    ),
+                )
+                return slide.slide_index, asset
+
+            retry_workers = min(2, len(missing_slides))
+            with ThreadPoolExecutor(
+                max_workers=retry_workers,
+                thread_name_prefix="ppt-image-retry",
+            ) as executor:
+                for slide_index, asset in executor.map(retry_candidate, missing_slides):
+                    if asset is not None:
+                        candidate_assets[slide_index] = asset
+
     for slide in deck.slides:
         image_item = image_plan_by_slide[slide.slide_index]
         query = image_item.search_query
@@ -304,6 +365,15 @@ def _image_resolution_worker_count(slide_count: int) -> int:
     return max(1, min(requested, slide_count, 6))
 
 
+def _image_generation_retry_rounds() -> int:
+    raw = os.getenv("AI_PPT_IMAGE_GENERATION_RETRY_ROUNDS", "2")
+    try:
+        requested = int(raw)
+    except ValueError:
+        requested = 2
+    return max(0, min(requested, 3))
+
+
 def _visual_asset_hash(path: Path) -> str:
     try:
         return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -332,10 +402,15 @@ def _read_cached_visual_asset(
     except (OSError, ValueError, json.JSONDecodeError):
         return None
     file_name = str(data.get("fileName") or "")
+    source_type = str(data.get("sourceType") or "cached_visual_asset")
+    if source_type in {"local_svg_fallback", "safe_vector_fallback", "local_deterministic_image"}:
+        return None
     if not file_name or "/" in file_name or "\\" in file_name:
         return None
     path = assets_dir / file_name
     if not path.is_file() or path.stat().st_size <= 0:
+        return None
+    if _image_has_excessive_visible_text(path):
         return None
     return VisualAsset(
         slide_index=slide_index,
@@ -343,7 +418,7 @@ def _read_cached_visual_asset(
         rel_path=f"assets/{file_name}",
         file_name=file_name,
         mime_type=str(data.get("mimeType") or "image/png"),
-        source_type=str(data.get("sourceType") or "cached_visual_asset"),
+        source_type=source_type,
         alt=str(data.get("alt") or _asset_alt(slide_index, str(data.get("query") or ""))),
         query=str(data.get("query") or ""),
         image_type=str(data.get("imageType") or image_type),
@@ -399,6 +474,7 @@ def _search_open_visual_asset(
     for candidate_query in _image_search_queries(query, image_type)[:4]:
         for searcher in (
             _search_bing_visual_asset,
+            _search_openverse_visual_asset,
             _search_wikipedia_page_visual_asset,
             _search_commons_visual_asset,
         ):
@@ -417,6 +493,192 @@ def _search_open_visual_asset(
             if asset is not None:
                 return asset
     return None
+
+
+def _search_openverse_visual_asset(
+    slide_index: int,
+    query: str,
+    assets_dir: Path,
+    *,
+    image_type: str,
+    purpose: str,
+    prompt: str,
+    provider_chain: list[str],
+    timeout_seconds: float | None,
+) -> VisualAsset | None:
+    search_url = "https://api.openverse.org/v1/images/?" + parse.urlencode(
+        {
+            "q": query,
+            "page_size": "8",
+            "license_type": "commercial",
+            "mature": "false",
+        }
+    )
+    try:
+        payload = _read_json_url(
+            search_url,
+            timeout=_image_search_timeout(timeout_seconds),
+            headers={"User-Agent": "AI-PPT-Agent/0.1 openverse-image-search"},
+        )
+        results = [item for item in payload.get("results") or [] if isinstance(item, dict)]
+        if not results:
+            return None
+        # A generic result that merely happens to contain one topic word is not
+        # useful in a decision slide. Rank the licensed results using their
+        # descriptive metadata before spending a download on them.
+        ordered = sorted(
+            results,
+            key=lambda item: _openverse_candidate_score(item, query),
+            reverse=True,
+        )
+        for item in ordered:
+            if _openverse_metadata_has_text_risk(item):
+                continue
+            width = int(item.get("width") or 0)
+            height = int(item.get("height") or 0)
+            if width and height and (width < 640 or height < 360):
+                continue
+            image_url = str(item.get("url") or item.get("thumbnail") or "")
+            if not image_url.lower().startswith("https://"):
+                continue
+            extension = _extension_for_mime_from_url(image_url)
+            file_name = f"slide-{slide_index}-openverse{extension}"
+            path = assets_dir / file_name
+            actual_mime = _download_binary(
+                image_url,
+                path,
+                timeout=_image_search_timeout(timeout_seconds),
+            )
+            if (
+                actual_mime not in {"image/jpeg", "image/png"}
+                or not path.is_file()
+                or path.stat().st_size <= 0
+                or _image_has_excessive_visible_text(path)
+            ):
+                path.unlink(missing_ok=True)
+                continue
+            correct_extension = _extension_for_mime(actual_mime)
+            if path.suffix.lower() != correct_extension:
+                renamed = path.with_suffix(correct_extension)
+                path.replace(renamed)
+                path = renamed
+                file_name = path.name
+            return VisualAsset(
+                slide_index=slide_index,
+                path=path,
+                rel_path=f"assets/{file_name}",
+                file_name=file_name,
+                mime_type=actual_mime,
+                source_type="openverse_search",
+                alt=_asset_alt(slide_index, query),
+                query=query,
+                image_type=image_type,
+                purpose=purpose,
+                prompt=prompt,
+                provider_chain=provider_chain,
+                attribution=_openverse_attribution(item),
+            )
+    except (OSError, ValueError, TimeoutError, json.JSONDecodeError):
+        return None
+    return None
+
+
+def _openverse_candidate_score(item: dict, query: str) -> int:
+    """Prefer page-specific licensed images over a merely topical result.
+
+    Openverse's ordering can be very broad for an enterprise slide query. Its
+    title and tags are the only portable relevance evidence available before
+    downloading an image, so use them to keep a factory page from receiving a
+    generic road photo or an unrelated branded product shot.
+    """
+
+    metadata_parts = [str(item.get("title") or "")]
+    tags = item.get("tags") or []
+    for tag in tags:
+        if isinstance(tag, dict):
+            metadata_parts.append(str(tag.get("name") or ""))
+        else:
+            metadata_parts.append(str(tag))
+    metadata = " ".join(metadata_parts).casefold()
+    tokens = [
+        token
+        for token in re.findall(r"[a-z0-9]{3,}", query.casefold())
+        if token
+        not in {
+            "and",
+            "for",
+            "from",
+            "image",
+            "no",
+            "photo",
+            "presentation",
+            "real",
+            "scene",
+            "text",
+            "the",
+            "with",
+            "world",
+        }
+    ]
+    score = sum(5 for token in dict.fromkeys(tokens) if token in metadata)
+    if query.casefold() in metadata:
+        score += 8
+    width = int(item.get("width") or 0)
+    height = int(item.get("height") or 0)
+    if width >= 1280 and height >= 720:
+        score += 2
+    if _openverse_metadata_has_text_risk(item):
+        score -= 40
+    return score
+
+
+def _openverse_metadata_has_text_risk(item: dict) -> bool:
+    metadata_parts = [str(item.get("title") or "")]
+    for tag in item.get("tags") or []:
+        metadata_parts.append(str(tag.get("name") if isinstance(tag, dict) else tag or ""))
+    metadata = " ".join(metadata_parts).casefold()
+    return any(term in metadata for term in OPEN_WEB_TEXT_RISK_TERMS)
+
+
+def _image_has_excessive_visible_text(path: Path) -> bool:
+    """Reject web/AI assets that would compete with editable PPT copy.
+
+    Tesseract is optional at deployment time. When installed it provides an
+    inexpensive last gate against signs, watermarks and pseudo-typography; when
+    it is unavailable the source and prompt gates still keep the workflow
+    functional. A deck author can disable it only with an explicit environment
+    configuration for a text-heavy use case.
+    """
+
+    enabled = os.getenv("AI_PPT_IMAGE_TEXT_SCAN_ENABLED", "true").strip().casefold()
+    if enabled in {"0", "false", "no", "off"}:
+        return False
+    try:
+        # Tiny fake-image fixtures and corrupt downloads cannot contain useful
+        # OCR evidence; skipping them also keeps the normal test path cheap.
+        if path.stat().st_size < 8 * 1024:
+            return False
+    except OSError:
+        return False
+    executable = shutil.which("tesseract")
+    if not executable:
+        return False
+    try:
+        result = subprocess.run(
+            [executable, str(path), "stdout", "--psm", "11", "-l", "eng"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    scanned = re.sub(r"[^a-z0-9]", "", result.stdout.casefold())
+    try:
+        threshold = int(os.getenv("AI_PPT_IMAGE_TEXT_SCAN_MIN_CHARS", "18"))
+    except ValueError:
+        threshold = 18
+    return len(scanned) >= max(8, min(threshold, 80))
 
 
 def _search_wikipedia_page_visual_asset(
@@ -465,7 +727,12 @@ def _search_wikipedia_page_visual_asset(
                     path,
                     timeout=_image_search_timeout(timeout_seconds),
                 )
-                if actual_mime not in {"image/jpeg", "image/png"} or not path.is_file() or path.stat().st_size <= 0:
+                if (
+                    actual_mime not in {"image/jpeg", "image/png"}
+                    or not path.is_file()
+                    or path.stat().st_size <= 0
+                    or _image_has_excessive_visible_text(path)
+                ):
                     path.unlink(missing_ok=True)
                     continue
                 if path.suffix.lower() != _extension_for_mime(actual_mime):
@@ -533,7 +800,12 @@ def _search_commons_visual_asset(
                 file_name = f"slide-{slide_index}-commons{extension}"
                 path = assets_dir / file_name
                 actual_mime = _download_binary(image_url, path, timeout=_image_search_timeout(timeout_seconds))
-                if actual_mime not in {"image/jpeg", "image/png"} or not path.is_file() or path.stat().st_size <= 0:
+                if (
+                    actual_mime not in {"image/jpeg", "image/png"}
+                    or not path.is_file()
+                    or path.stat().st_size <= 0
+                    or _image_has_excessive_visible_text(path)
+                ):
                     path.unlink(missing_ok=True)
                     continue
                 return VisualAsset(
@@ -598,7 +870,12 @@ def _search_bing_visual_asset(
             file_name = f"slide-{slide_index}-bing{extension}"
             path = assets_dir / file_name
             actual_mime = _download_binary(image_url, path, timeout=_image_search_timeout(timeout_seconds))
-            if actual_mime not in {"image/jpeg", "image/png"} or not path.is_file() or path.stat().st_size <= 0:
+            if (
+                actual_mime not in {"image/jpeg", "image/png"}
+                or not path.is_file()
+                or path.stat().st_size <= 0
+                or _image_has_excessive_visible_text(path)
+            ):
                 path.unlink(missing_ok=True)
                 continue
             if path.suffix.lower() != _extension_for_mime(actual_mime):
@@ -683,6 +960,9 @@ def _generate_visual_asset_with_ai(
     file_name = f"slide-{slide_index}-ai{extension}"
     path = assets_dir / file_name
     path.write_bytes(generated.bytes)
+    if _image_has_excessive_visible_text(path):
+        path.unlink(missing_ok=True)
+        return None
     return VisualAsset(
         slide_index=slide_index,
         path=path,
@@ -726,10 +1006,12 @@ def _ai_image_generation_prompt(
         composition_archetype,
     ):
         variant = _safe_abstract_image_variant(slide_index, slide_title, purpose, composition_archetype)
+        environment = _safe_image_environment_hint(image_type)
         object_hint = _safe_content_object_hint(query, image_prompt, slide_title, slide_intent, purpose)
         return (
             "Create a premium 16:9 editorial macro photograph of an abstract still life. "
             f"{variant}. "
+            f"{environment}. "
             f"{object_hint}. "
             "The scene is made only from blank translucent glass objects, matte ceramic forms, coffee-toned stone, soft fabric, water reflections, and warm light beams. "
             "All surfaces are plain, smooth, unmarked, pattern-free, brand-free, logo-free, label-free, and minimal. "
@@ -759,11 +1041,70 @@ def _ai_image_generation_prompt(
 
 
 def _is_text_risk_image_type(image_type: str) -> bool:
-    return image_type in {"icon_illustration", "data_visual", "product_showcase"}
+    # Free image models frequently turn words such as "slide", "report", or
+    # "classroom" into fake typography. Keep every supported PPT asset type on
+    # the concrete no-text scene path; unknown custom types retain the generic
+    # provider prompt for compatibility.
+    return image_type in IMAGE_SEARCH_FALLBACK_QUERIES
+
+
+def _safe_image_environment_hint(image_type: str) -> str:
+    environments = {
+        "background": "Environment: an architectural light field with sculptural depth and no walls carrying marks",
+        "course_review_atmosphere": (
+            "Environment: a quiet sunlit lecture hall suggested only by sculptural seating rhythms and clean light"
+        ),
+        "business_scene": (
+            "Environment: a premium boardroom-inspired tabletop made only from blank architectural strategy objects"
+        ),
+        "classical_element": (
+            "Environment: a misty ink-wash material landscape made from stone, paper texture, water, and shadow; "
+            "no calligraphy, seals, scroll writing, or symbols"
+        ),
+        "thesis_concept": (
+            "Environment: a museum-like research still life with glass knowledge nodes and completely blank paper-like planes"
+        ),
+        "product_showcase": (
+            "Environment: an unbranded sculptural product plinth with smooth blank physical forms and studio reflections"
+        ),
+        "icon_illustration": "Environment: a tactile three-dimensional symbolic object scene made from plain geometric materials",
+        "data_visual": (
+            "Environment: a physical evidence metaphor built from glass tokens, height differences, and directional light; "
+            "every element is tactile, blank, geometric, and unmarked"
+        ),
+    }
+    return environments.get(
+        image_type,
+        "Environment: a clean content-matched physical scene with no writable or labelled surfaces",
+    )
 
 
 def _safe_content_object_hint(*values: str) -> str:
     text = " ".join(str(value) for value in values).casefold()
+    if any(
+        marker in text
+        for marker in ("\u65b0\u80fd\u6e90\u6c7d\u8f66", "\u65b0\u80fd\u6e90\u8f66", "\u7535\u52a8\u6c7d\u8f66", "electric vehicle", "electric car")
+    ):
+        if any(
+            marker in text
+            for marker in ("\u7ade\u4e89", "\u89c4\u5219", "\u80fd\u529b", "\u8d5b\u9053", "competition", "capability")
+        ):
+            return (
+                "Content cue: show a clean unbranded electric-vehicle production line with a single silver vehicle body, "
+                "battery modules as tactile engineering objects, soft factory depth, and no readable panels"
+            )
+        if any(
+            marker in text
+            for marker in ("\u7528\u6237", "\u9700\u6c42", "\u51b3\u7b56", "\u4f53\u9a8c", "customer", "consumer", "demand", "experience")
+        ):
+            return (
+                "Content cue: show one unbranded electric car in a quiet real-world mobility scene, "
+                "a driver silhouette or charging connection, natural depth, and absolutely no signs or text"
+            )
+        return (
+            "Content cue: show one unbranded premium electric vehicle in a clean studio or architectural city setting, "
+            "with tactile battery or charging details, cinematic depth, and no signs, screens, labels, or logos"
+        )
     if any(marker in text for marker in ("路径", "落地", "route", "path", "roadmap")):
         return (
             "Content cue: build a path metaphor with staggered blank stone steps, a subtle route line, "
@@ -1059,8 +1400,15 @@ def _image_search_queries(query: str, image_type: str) -> list[str]:
         _clean_visible_text(query, role="body", clip=False) or query,
         160,
     )
+    subject_queries = _subject_image_queries(cleaned_query, image_type)
+    cross_language_queries = _cross_language_image_queries(cleaned_query, image_type)
     candidates = [
-        *_subject_image_queries(cleaned_query, image_type),
+        # For CJK source text, the short, scene-specific English query has a
+        # much deeper licensed-image inventory than a whole sentence copied
+        # from the outline. Try it before the topic-only fallback.
+        *cross_language_queries,
+        *(subject_queries[:1]),
+        *(subject_queries[1:]),
         cleaned_query,
         *_semantic_image_queries(cleaned_query, image_type),
         *IMAGE_SEARCH_FALLBACK_QUERIES.get(image_type, ()),
@@ -1071,6 +1419,65 @@ def _image_search_queries(query: str, image_type: str) -> list[str]:
         if cleaned and cleaned not in unique:
             unique.append(cleaned)
     return unique
+
+
+def _cross_language_image_queries(query: str, image_type: str) -> list[str]:
+    lowered = query.casefold()
+    if any(marker in lowered for marker in ("新能源汽车", "新能源车", "电动汽车", "electric vehicle", "electric car")):
+        if any(
+            marker in lowered
+            for marker in ("\u7ade\u4e89", "\u89c4\u5219", "\u80fd\u529b", "\u8d5b\u9053", "competition", "capability", "industry")
+        ):
+            return [
+                "electric vehicle factory production line",
+                "automotive battery manufacturing",
+                "electric vehicle supply chain",
+            ]
+        if any(
+            marker in lowered
+            for marker in ("\u7528\u6237", "\u9700\u6c42", "\u51b3\u7b56", "\u4f53\u9a8c", "customer", "consumer", "demand", "experience")
+        ):
+            return [
+                "electric car driver on road",
+                "electric vehicle charging at home",
+                "electric car urban mobility",
+            ]
+        if any(
+            marker in lowered
+            for marker in ("\u589e\u957f", "\u54c1\u724c", "\u5e02\u573a", "\u4f18\u52bf", "growth", "brand", "market", "advantage")
+        ):
+            return [
+                "modern electric vehicle showroom",
+                "electric car city street",
+                "electric vehicle design studio",
+            ]
+        if any(
+            marker in lowered
+            for marker in ("\u884c\u52a8", "\u8def\u5f84", "\u6218\u7565", "\u7ec4\u7ec7", "\u534f\u540c", "strategy", "roadmap", "team", "organization")
+        ):
+            return [
+                "automotive engineering team electric vehicle",
+                "electric vehicle design studio",
+                "electric vehicle factory planning",
+            ]
+        if image_type == "product_showcase":
+            return ["modern electric vehicle", "electric vehicle showroom", "electric car design studio"]
+        if image_type == "business_scene":
+            return ["electric vehicle factory", "automotive strategy meeting", "electric vehicle supply chain"]
+        if image_type == "course_review_atmosphere":
+            return ["electric vehicle industry", "electric vehicle charging station", "modern electric cars"]
+        return ["electric vehicle", "electric vehicle factory", "electric vehicle charging station"]
+    if any(marker in lowered for marker in ("人工智能", "artificial intelligence", "machine learning")):
+        return ["artificial intelligence research", "computer science laboratory", "technology abstract"]
+    if any(marker in lowered for marker in ("教育", "课堂", "大学", "education", "university", "classroom")):
+        return ["university classroom", "students lecture hall", "academic research"]
+    if any(marker in lowered for marker in ("咖啡", "零售", "门店", "coffee", "retail", "store")):
+        return ["modern coffee shop", "retail business", "coffee store interior"]
+    if any(marker in lowered for marker in ("论文", "研究", "thesis", "research")):
+        return ["academic research", "university library", "research laboratory"]
+    if image_type == "business_scene":
+        return ["business strategy meeting", "modern office collaboration"]
+    return []
 
 
 def _subject_image_queries(query: str, image_type: str) -> list[str]:
@@ -1249,6 +1656,19 @@ def _commons_attribution(image_info: dict) -> str | None:
         if value:
             parts.append(value)
     return " / ".join(parts[:3]) or "Wikimedia Commons"
+
+
+def _openverse_attribution(item: dict) -> str:
+    title = _clean_visible_text(str(item.get("title") or "Openverse image"), role="body", clip=False)
+    creator = _clean_visible_text(str(item.get("creator") or "Unknown creator"), role="body", clip=False)
+    license_name = str(item.get("license") or "open license").upper()
+    license_version = str(item.get("license_version") or "").strip()
+    landing_url = str(item.get("foreign_landing_url") or item.get("license_url") or "")
+    license_label = f"{license_name} {license_version}".strip()
+    return _clip_for_asset(
+        f"{title} / {creator} / {license_label} / Openverse / {landing_url}",
+        220,
+    )
 
 
 def _bing_attribution(item: dict) -> str:

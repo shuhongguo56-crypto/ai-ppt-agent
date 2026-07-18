@@ -18,7 +18,7 @@ type ProjectFilter = "all" | "ready" | "active";
 type ProjectStage = "brief" | "outline" | "visual_direction" | "slide_deck" | "render" | "quality";
 
 const defaultApiBase = (
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://timeline-strong-hearing-resolve.trycloudflare.com/api"
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://ctrl-trials-europe-radar.trycloudflare.com/api"
 ).replace(/\/$/, "");
 
 function normalizeApiBase(value: string) {

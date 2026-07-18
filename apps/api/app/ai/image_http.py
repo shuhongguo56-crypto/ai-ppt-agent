@@ -119,6 +119,10 @@ class PollinationsImageGateway:
             "private": str(self._private).lower(),
             "nologo": str(self._nologo).lower(),
             "referrer": self._referrer,
+            "negative_prompt": (
+                "text, letters, words, numbers, typography, logo, watermark, signature, caption, "
+                "label, signage, document, poster, presentation slide, dashboard, user interface, screen"
+            ),
         }
 
         def operation() -> httpx.Response:

@@ -1219,6 +1219,7 @@ def _visual_asset_source_quality(render_dir: Path, expected_slide_count: int) ->
         "bing_image_search",
         "wikipedia_page_image",
         "wikimedia_commons_search",
+        "openverse_search",
         "ai_fallback",
         "free_ai_fallback",
     }

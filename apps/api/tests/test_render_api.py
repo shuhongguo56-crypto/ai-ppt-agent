@@ -218,6 +218,29 @@ def test_ai_image_prompt_varies_safe_abstract_scene_by_slide() -> None:
     assert "Variant " in second_prompt
 
 
+def test_all_supported_image_types_use_no_text_physical_scenes() -> None:
+    for image_type in render_service.IMAGE_SEARCH_FALLBACK_QUERIES:
+        prompt = render_service._ai_image_generation_prompt(
+            slide_index=2,
+            query="customer growth strategy",
+            image_type=image_type,
+            purpose="explain the strategic decision",
+            image_prompt="premium presentation visual",
+            slide_title="Growth priorities",
+            slide_intent="show the conclusion clearly",
+            asset_role="context",
+            image_treatment="masked_window",
+            composition_archetype="editorial_split",
+            direction_name="Product Showcase",
+            palette=["#0F5132", "#F6F2E8"],
+        )
+        lowered = prompt.casefold()
+        assert "abstract still life" in lowered
+        assert "slide title" not in lowered
+        assert "presentation visual" not in lowered
+        assert "no visible text" in lowered
+
+
 def create_renderable_deck(client) -> dict:
     assert client.post("/api/projects", json=PROJECT).status_code == 201
     outline = client.post("/api/projects/project-render/outline/generate", json={})
@@ -623,6 +646,108 @@ def test_open_visual_search_uses_wikipedia_page_images_without_bing_key(tmp_path
     assert any("wikipedia.org" in url for url in requested_urls)
 
 
+def test_open_visual_search_uses_openverse_licensed_images(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("AI_PPT_BING_IMAGE_SEARCH_KEY", raising=False)
+
+    def fake_read_json_url(url: str, *, timeout: float, headers: dict[str, str] | None = None) -> dict:
+        assert "api.openverse.org/v1/images/" in url
+        assert "license_type=commercial" in url
+        assert headers and "openverse" in headers["User-Agent"]
+        return {
+            "results": [
+                {
+                    "title": "Electric vehicle factory",
+                    "creator": "Example photographer",
+                    "license": "by",
+                    "license_version": "4.0",
+                    "url": "https://images.example/ev-factory.jpg",
+                    "foreign_landing_url": "https://example.com/ev-factory",
+                    "width": 1600,
+                    "height": 900,
+                }
+            ]
+        }
+
+    def fake_download_binary(url: str, path: Path, *, timeout: float) -> str:
+        path.write_bytes(b"\xff\xd8\xff\x00openverse")
+        return "image/jpeg"
+
+    monkeypatch.setattr(render_service, "_read_json_url", fake_read_json_url)
+    monkeypatch.setattr(render_service, "_download_binary", fake_download_binary)
+
+    asset = render_service._search_open_visual_asset(
+        1,
+        "electric vehicle factory",
+        tmp_path,
+        image_type="business_scene",
+        purpose="Explain the automotive supply chain",
+        prompt="Licensed automotive photograph",
+        provider_chain=["open_web_search"],
+        timeout_seconds=0.2,
+    )
+
+    assert asset is not None
+    assert asset.source_type == "openverse_search"
+    assert asset.file_name == "slide-1-openverse.jpg"
+    assert "Example photographer" in (asset.attribution or "")
+    assert "BY 4.0" in (asset.attribution or "")
+
+
+def test_electric_vehicle_search_adds_short_english_queries_early() -> None:
+    queries = render_service._image_search_queries(
+        "中国新能源汽车品牌如何建立增长优势",
+        "product_showcase",
+    )
+
+    assert "modern electric vehicle showroom" in queries[:4]
+    assert "electric vehicle design studio" in queries[:4]
+
+
+def test_electric_vehicle_search_uses_slide_intent_before_generic_topic() -> None:
+    queries = render_service._cross_language_image_queries(
+            "\u65b0\u80fd\u6e90\u6c7d\u8f66\u7ade\u4e89\u89c4\u5219\u4e0e\u4f9b\u5e94\u94fe\u80fd\u529b",
+        "business_scene",
+    )
+
+    assert queries[0] == "electric vehicle factory production line"
+    assert "automotive battery manufacturing" in queries
+
+
+def test_openverse_ranking_prefers_specific_non_textual_metadata() -> None:
+    specific = {
+        "title": "Electric vehicle factory production line",
+        "tags": [{"name": "battery"}, {"name": "manufacturing"}],
+        "width": 1920,
+        "height": 1080,
+    }
+    generic = {
+        "title": "Toll electric vehicle advertisement signage",
+        "tags": [{"name": "brand"}],
+        "width": 1920,
+        "height": 1080,
+    }
+
+    assert render_service._openverse_candidate_score(
+        specific, "electric vehicle factory production line"
+    ) > render_service._openverse_candidate_score(
+        generic, "electric vehicle factory production line"
+    )
+    assert render_service._openverse_metadata_has_text_risk(generic) is True
+
+
+def test_visible_text_scan_rejects_large_web_asset(monkeypatch, tmp_path) -> None:
+    image_path = tmp_path / "labelled.jpg"
+    image_path.write_bytes(b"0" * (9 * 1024))
+    monkeypatch.setattr(render_service.shutil, "which", lambda _name: "tesseract")
+    monkeypatch.setattr(
+        render_service.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(stdout="Electric Vehicle Charging Station"),
+    )
+
+    assert render_service._image_has_excessive_visible_text(image_path) is True
+
+
 def test_ppt_render_compacts_and_deduplicates_visible_body_blocks() -> None:
     slide = SimpleNamespace(
         title="汇报路径",
@@ -919,6 +1044,70 @@ def test_visual_asset_resolution_runs_first_candidates_concurrently(tmp_path) ->
     assert gateway.max_active >= 2
     assert len(assets) == 4
     assert len({render_service._visual_asset_hash(asset.path) for asset in assets.values()}) == 4
+
+
+def test_visual_asset_resolution_retries_only_missing_provider_assets(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(render_service.time, "sleep", lambda _seconds: None)
+
+    class RecoveringImageGateway:
+        def __init__(self) -> None:
+            self.lock = threading.Lock()
+            self.calls = 0
+
+        def generate(self, request):
+            with self.lock:
+                self.calls += 1
+                call = self.calls
+            if call <= 4:
+                raise OSError("temporary free-provider throttle")
+            return GeneratedImage(
+                bytes=b"\xff\xd8\xff\xe0" + f"recovered-{call}".encode(),
+                mime_type="image/jpeg",
+                width=request.width,
+                height=request.height,
+                model="pollinations:flux",
+            )
+
+    def slide(slide_index: int):
+        return SimpleNamespace(
+            slide_index=slide_index,
+            title=f"Slide {slide_index}",
+            visual_intent=f"Explain idea {slide_index}",
+            design_plan=SimpleNamespace(
+                asset_role="hero",
+                image_treatment="masked_window",
+                composition_archetype="editorial_cover",
+            ),
+        )
+
+    def image_plan(slide_index: int):
+        return SimpleNamespace(
+            slide=slide_index,
+            search_query=f"specific scene {slide_index}",
+            image_type="business_scene",
+            purpose=f"Explain slide {slide_index}",
+            prompt=f"Physical scene {slide_index}",
+            provider_chain=["Pollinations FLUX API"],
+        )
+
+    deck = SimpleNamespace(
+        slides=[slide(index) for index in range(1, 5)],
+        image_plan=[image_plan(index) for index in range(1, 5)],
+        theme=SimpleNamespace(name="Enterprise Editorial", palette=["#111111", "#F2BF4A"]),
+    )
+    gateway = RecoveringImageGateway()
+
+    assets = render_service.resolve_visual_assets(
+        deck,
+        tmp_path,
+        gateway,
+        mode="generate",
+        image_search_enabled=False,
+    )
+
+    assert gateway.calls == 8
+    assert all(asset.source_type == "free_ai_fallback" for asset in assets.values())
+    assert not list((tmp_path / "assets").glob("*-local.svg"))
 
 
 def test_render_requires_confirmed_slide_deck_and_fresh_version(client) -> None:

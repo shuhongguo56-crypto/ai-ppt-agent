@@ -574,3 +574,18 @@ Completed on 2026-07-15:
 - Delivery QA project `qa-delivery-20260715130540` produced 8 page-specific composition variants, 8 visual assets, editable PPTX, HyperFrames HTML, and a 44/44 `ready` quality result.
 - QA artifacts: `D:\Codex\Outputs\ai-ppt-final-qa-20260715-v2` and `D:\Codex\Outputs\ai-ppt-ui-qa-20260715`.
 - Verification: 347 Python tests passed and the Next.js production build passed.
+
+## Semantic image sourcing and visible-text rejection
+
+Completed on 2026-07-18:
+
+- Image resolution now ranks licensed Openverse results by page-specific query relevance before downloading them.
+- Chinese electric-vehicle topics use slide-intent-specific English scene queries for competition, customer, growth, strategy, and organization pages instead of repeating one generic topic query.
+- Web and generated image candidates now pass an optional local Tesseract OCR gate. Images carrying excessive signage, labels, watermarks, or pseudo-typography are rejected before PPTX/HTML rendering.
+- Openverse metadata carrying explicit sign/logo/poster/branding risk is rejected before download.
+- Pollinations negative prompts and every supported image-type prompt forbid text, numbers, logos, watermarks, interfaces, documents, and slide-like imagery.
+- Free image generation retries only pages that remain unresolved, at reduced concurrency, before the deterministic local fallback.
+- Cached deterministic placeholder assets are ignored during automatic refresh so a later run can upgrade them to licensed or generated visuals.
+- Public API restarted with cascade text routing, open-web image search, Pollinations FLUX fallback, three image workers, two recovery rounds, and OCR enabled.
+- Current public API: `https://ctrl-trials-europe-radar.trycloudflare.com`.
+- Verification: 357 Python tests passed; Next.js production build and typecheck passed; Git diff whitespace validation passed.

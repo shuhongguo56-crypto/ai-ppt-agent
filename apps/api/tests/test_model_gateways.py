@@ -223,6 +223,10 @@ def test_pollinations_image_gateway_downloads_free_flux_image(monkeypatch: pytes
         "private": "true",
         "nologo": "true",
         "referrer": "ai-ppt-agent",
+        "negative_prompt": (
+            "text, letters, words, numbers, typography, logo, watermark, signature, caption, "
+            "label, signage, document, poster, presentation slide, dashboard, user interface, screen"
+        ),
     }
 
 

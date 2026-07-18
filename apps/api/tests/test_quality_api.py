@@ -212,6 +212,28 @@ def test_visual_asset_source_quality_rejects_svg_or_local_fallback(tmp_path) -> 
     assert "source=safe_vector_fallback" in result["issues"][0]
 
 
+def test_visual_asset_source_quality_accepts_openverse_photograph(tmp_path) -> None:
+    assets_dir = tmp_path / "assets"
+    assets_dir.mkdir()
+    (assets_dir / "slide-1-openverse.jpg").write_bytes(b"\xff\xd8\xff\xe0licensed-photo")
+    (assets_dir / "slide-1-asset.json").write_text(
+        json.dumps(
+            {
+                "slide": 1,
+                "fileName": "slide-1-openverse.jpg",
+                "mimeType": "image/jpeg",
+                "sourceType": "openverse_search",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = quality_service._visual_asset_source_quality(tmp_path, 1)
+
+    assert result["passed"] is True
+    assert result["usable"] == 1
+
+
 def test_visual_asset_uniqueness_rejects_reused_binary(tmp_path) -> None:
     assets_dir = tmp_path / "assets"
     assets_dir.mkdir()
