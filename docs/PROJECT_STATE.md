@@ -663,4 +663,4 @@ Completed on 2026-07-19:
 - Final-artifact completeness also rejects dangling partial Latin words such as `ste` or `di`; removing an ellipsis alone is not treated as a repair.
 - Both completeness checks are required by customer-delivery readiness and the research/enterprise baseline, closing the gap where JSON-level checks passed while slideshow copy still looked truncated.
 - Competition copy density now rejects canonical titles that carry a truncation marker or exceed the practical 30-CJK/62-Latin title budget.
-- Verification: 367 Python tests passed, including final-artifact truncation detection, semantic bilingual title condensation, repaired-deck behavior, and the full render/quality suite.
+- Verification: 368 Python tests passed, including final-artifact truncation detection, semantic bilingual title condensation, outline-rehydrated repair behavior, and the full render/quality suite.
