@@ -588,4 +588,11 @@ Completed on 2026-07-18:
 - Cached deterministic placeholder assets are ignored during automatic refresh so a later run can upgrade them to licensed or generated visuals.
 - Public API restarted with cascade text routing, open-web image search, Pollinations FLUX fallback, three image workers, two recovery rounds, and OCR enabled.
 - Current public API: `https://ctrl-trials-europe-radar.trycloudflare.com`.
+
+## Self-healing public entry
+
+- `scripts/public-runtime.ps1` keeps the free local FastAPI/PPT engine and Cloudflare quick tunnel reachable through one permanent GitHub Pages entry.
+- The script starts the API when needed, reuses a healthy tunnel, creates a replacement tunnel after a disconnect, and updates only `live/index.html` on the Pages branch through the authenticated GitHub CLI.
+- Runtime state and logs are stored under `D:\Codex\Workspaces\ai-ppt-public-runtime`; no provider keys are committed.
+- The intended Windows scheduled task runs the supervisor every five minutes, so reconnects do not require the customer-facing URL to change.
 - Verification: 357 Python tests passed; Next.js production build and typecheck passed; Git diff whitespace validation passed.
