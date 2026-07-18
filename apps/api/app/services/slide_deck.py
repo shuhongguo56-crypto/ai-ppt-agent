@@ -346,6 +346,11 @@ def repair_slide_deck_for_quality(
                         seen_visible.add(fingerprint)
                 repaired_blocks.append(block)
             slide_payload["blocks"] = repaired_blocks
+            repaired_diagram_labels = _repair_diagram_labels(slide_payload)
+            slide_payload["designPlan"]["diagramLabels"] = repaired_diagram_labels
+            slide_payload["designPlan"]["visualBrief"] = _clip_title_without_ellipsis(
+                " — ".join(repaired_diagram_labels), 520
+            )
             slide_payload["designPlan"]["contentDensity"] = (
                 "sparse" if repair_pass >= 2 else "balanced"
             )
@@ -431,7 +436,7 @@ def repair_slide_deck_for_quality(
     if text_repair:
         payload["title"] = payload["slides"][0]["title"]
 
-    if image_repair:
+    if text_repair or image_repair:
         for item, slide_payload in zip(payload["imagePlan"], payload["slides"], strict=True):
             page_subject = " ".join(
                 part
@@ -469,6 +474,25 @@ def _outline_source_for_block(block: dict, outline_slide) -> str:
         if 0 <= point_index < len(outline_slide.talking_points):
             return str(outline_slide.talking_points[point_index])
     return str(block["content"])
+
+
+def _repair_diagram_labels(slide_payload: dict) -> list[str]:
+    candidates = [
+        str(slide_payload["title"]),
+        *(
+            str(block["content"])
+            for block in slide_payload["blocks"]
+            if block["blockType"] in {"body", "card"}
+        ),
+    ]
+    labels: list[str] = []
+    for candidate in candidates:
+        cleaned = _compact_diagram_label(candidate)
+        if cleaned and cleaned not in labels:
+            labels.append(cleaned)
+        if len(labels) == 4:
+            break
+    return labels
 
 
 def _repair_title_source(
@@ -1203,17 +1227,11 @@ def _compact_diagram_label(value: str) -> str:
     ).strip()
     has_cjk = bool(re.search(r"[\u3400-\u9fff]", cleaned))
     limit = 32 if has_cjk else 64
-    if len(cleaned) <= limit:
-        return cleaned
-    shortened = cleaned[: limit - 1]
-    boundary = max(shortened.rfind(mark) for mark in ("，", "。", "；", ",", ";", ":"))
-    if boundary >= max(12, limit // 2):
-        shortened = shortened[:boundary]
-    return shortened.rstrip("，。；,;:： ") + "…"
+    return _clip_title_without_ellipsis(cleaned, limit)
 
 
 def _visual_brief(slide, diagram_labels: list[str]) -> str:
-    return _clip_text(" — ".join(diagram_labels), 520)
+    return _clip_title_without_ellipsis(" — ".join(diagram_labels), 520)
 
 
 def _design_rationale(slide, archetype: str, image_treatment: str, density: str, language: str) -> str:

@@ -505,6 +505,11 @@ def test_quality_repair_keeps_one_valid_deck_contract_and_increases_visual_varie
         for slide in repaired.slides
         for block in slide.blocks
     )
+    assert all(
+        not re.search(r"(?:…|\.{3})", label)
+        for slide in repaired.slides
+        for label in slide.design_plan.diagram_labels
+    )
     assert all(slide.design_plan.content_density == "sparse" for slide in repaired.slides)
     assert len({slide.design_plan.composition_archetype for slide in repaired.slides}) == len(
         repaired.slides
@@ -551,3 +556,5 @@ def test_quality_repair_rehydrates_copy_from_confirmed_outline(client) -> None:
     )
     assert "repeat, distinguish and verify" in repaired_key_point.content
     assert not repaired_key_point.content.endswith("di")
+    assert slide.title in repaired.image_plan[5].prompt
+    assert all("…" not in label for label in slide.design_plan.diagram_labels)
