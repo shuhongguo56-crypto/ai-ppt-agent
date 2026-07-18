@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 from dataclasses import dataclass
 from typing import Any, Mapping
 from urllib.parse import quote
@@ -120,6 +121,11 @@ class PollinationsImageGateway:
             "private": str(self._private).lower(),
             "nologo": str(self._nologo).lower(),
             "referrer": self._referrer,
+            "seed": int.from_bytes(
+                hashlib.sha256(f"{self._model}:{prompt}".encode("utf-8")).digest()[:4],
+                "big",
+            )
+            % 1_000_000_000,
             "negative_prompt": (
                 "text, letters, words, numbers, typography, logo, watermark, signature, caption, "
                 "label, signage, document, poster, presentation slide, dashboard, user interface, screen"

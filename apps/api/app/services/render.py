@@ -562,7 +562,7 @@ def _image_generation_retry_rounds() -> int:
         requested = int(raw)
     except ValueError:
         requested = 2
-    return max(0, min(requested, 3))
+    return max(0, min(requested, 5))
 
 
 def _visual_asset_hash(path: Path) -> str:

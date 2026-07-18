@@ -224,7 +224,10 @@ def test_pollinations_image_gateway_downloads_free_flux_image(monkeypatch: pytes
     assert image.bytes.startswith(b"\xff\xd8\xff")
     assert image.model == "pollinations:flux"
     assert "image.pollinations.ai/prompt/" in str(captured["url"])
-    assert captured["params"] == {
+    params = dict(captured["params"])
+    seed = params.pop("seed")
+    assert isinstance(seed, int) and 0 <= seed < 1_000_000_000
+    assert params == {
         "width": 1024,
         "height": 576,
         "model": "flux",
