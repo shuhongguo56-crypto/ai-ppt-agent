@@ -320,6 +320,35 @@ def repair_slide_deck_for_quality(
                 )
             ]
             if not candidates:
+                global_fallback = (
+                    "system_map",
+                    "editorial_split",
+                    "proof_mosaic",
+                    "data_landscape",
+                    "split_comparison",
+                    "priority_stack",
+                    "process_ribbon",
+                    "cinematic_hero",
+                    "editorial_cover",
+                    "architectural_cover",
+                    "chapter_index",
+                    "diagonal_story",
+                    "statement_focus",
+                    "closing_echo",
+                    "manifesto_close",
+                    "future_horizon",
+                )
+                candidates = [
+                    item
+                    for item in global_fallback
+                    if item != previous_archetype
+                    and item not in used_repair_archetypes
+                    and not (
+                        full_bleed_repair_count >= 2
+                        and visual_placement(item).mode == "full_bleed"
+                    )
+                ]
+            if not candidates:
                 candidates = [
                     item
                     for item in ordered_pool

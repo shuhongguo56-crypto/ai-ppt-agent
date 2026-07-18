@@ -477,7 +477,9 @@ def test_quality_repair_keeps_one_valid_deck_contract_and_increases_visual_varie
         assert lowered.count("award-winning corporate presentation standard") == 1
     assert all(len(slide.title) <= 54 for slide in repaired.slides)
     assert all(slide.design_plan.content_density == "sparse" for slide in repaired.slides)
-    assert len({slide.design_plan.composition_archetype for slide in repaired.slides}) >= 5
+    assert len({slide.design_plan.composition_archetype for slide in repaired.slides}) == len(
+        repaired.slides
+    )
     assert len({slide.design_plan.image_treatment for slide in repaired.slides}) >= 3
     assert len({slide.design_plan.motion_preset for slide in repaired.slides}) >= 3
     assert repaired.export_targets == ["pptx", "hyperframes_html"]
