@@ -4,6 +4,7 @@ import hashlib
 import re
 
 from ai_ppt_contracts import OutlineDecision, SlideDeck, VisualDirectionDecision
+from app.services.composition_library import visual_placement
 from app.services.image_agent import build_image_plan
 
 
@@ -262,6 +263,8 @@ def repair_slide_deck_for_quality(
         card_limit = 46 if language == "zh" else 92
 
     previous_archetype: str | None = None
+    used_repair_archetypes: set[str] = set()
+    full_bleed_repair_count = 0
     for slide_payload in payload["slides"]:
         slide_index = int(slide_payload["slideIndex"])
         if text_repair:
@@ -305,9 +308,28 @@ def repair_slide_deck_for_quality(
             purpose = str(slide_payload["purpose"])
             pool = _PURPOSE_ARCHETYPES[purpose]
             offset = (slide_index + repair_pass) % len(pool)
-            archetype = pool[offset]
-            if archetype == previous_archetype:
-                archetype = next(item for item in pool if item != previous_archetype)
+            ordered_pool = pool[offset:] + pool[:offset]
+            candidates = [
+                item
+                for item in ordered_pool
+                if item != previous_archetype
+                and item not in used_repair_archetypes
+                and not (
+                    full_bleed_repair_count >= 2
+                    and visual_placement(item).mode == "full_bleed"
+                )
+            ]
+            if not candidates:
+                candidates = [
+                    item
+                    for item in ordered_pool
+                    if item != previous_archetype
+                    and not (
+                        full_bleed_repair_count >= 2
+                        and visual_placement(item).mode == "full_bleed"
+                    )
+                ]
+            archetype = candidates[0] if candidates else ordered_pool[0]
             plan = slide_payload["designPlan"]
             plan["compositionArchetype"] = archetype
             rhythm = _page_rhythm(slide_index, len(payload["slides"]))
@@ -324,6 +346,9 @@ def repair_slide_deck_for_quality(
                 "annotated_image",
                 "summary_map",
             )[(slide_index + repair_pass) % 7]
+            used_repair_archetypes.add(archetype)
+            if visual_placement(archetype).mode == "full_bleed":
+                full_bleed_repair_count += 1
             previous_archetype = archetype
         else:
             previous_archetype = slide_payload["designPlan"]["compositionArchetype"]
