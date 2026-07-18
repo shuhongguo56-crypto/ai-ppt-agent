@@ -396,6 +396,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 for item in image_provider_chain
             ),
             "imageProviderChain": image_provider_chain,
+            "imageUpscalerReady": bool(
+                resolved.realesrgan_enabled
+                and resolved.realesrgan_executable is not None
+                and resolved.realesrgan_executable.is_file()
+            ),
+            "imageUpscalerModel": resolved.realesrgan_model,
+            "expertImageResolution": {
+                "ordinary": [
+                    resolved.expert_image_min_long_edge,
+                    resolved.expert_image_min_short_edge,
+                ],
+                "keyPage": [
+                    resolved.expert_key_image_min_long_edge,
+                    resolved.expert_key_image_min_short_edge,
+                ],
+            },
             "defaultAgentMode": resolved.default_agent_mode,
             "defaultCostArchitecture": resolved.default_cost_architecture,
             "agentModePolicy": runtime_agent_modes(resolved.default_agent_mode),

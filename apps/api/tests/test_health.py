@@ -204,6 +204,12 @@ def test_runtime_status_reports_cascade_backend_without_secrets(tmp_path) -> Non
     assert payload["providerChain"][0]["name"] == "openrouter"
     assert payload["providerChain"][-1]["name"] == "enhanced-local-fallback"
     assert payload["imageGenerationReady"] is True
+    assert payload["imageUpscalerReady"] is False
+    assert payload["imageUpscalerModel"] == "realesrgan-x4plus"
+    assert payload["expertImageResolution"] == {
+        "ordinary": [1920, 1080],
+        "keyPage": [3840, 2160],
+    }
     assert any(
         item["name"] == "pollinations-free" and item["configured"] and item["freeOrLocal"]
         for item in payload["imageProviderChain"]
