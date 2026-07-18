@@ -74,6 +74,11 @@ def test_assemble_slide_deck_from_confirmed_outline_and_visual_direction(client)
     assert [slide["slideIndex"] for slide in deck["slides"]] == list(range(1, 9))
     assert [item["slide"] for item in deck["imagePlan"]] == list(range(1, 9))
     assert all(item["needsImage"] for item in deck["imagePlan"])
+
+    retried = assemble_deck(client, visual["version"])
+    assert retried.status_code == 200
+    assert retried.json()["version"] == payload["version"]
+    assert retried.json()["slideDeck"] == payload["slideDeck"]
     assert all(
         item["imageType"]
         in {

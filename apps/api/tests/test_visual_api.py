@@ -102,6 +102,15 @@ def test_generate_and_select_visual_direction(client) -> None:
     assert selected.json()["nextStep"] == "slide_deck"
     assert selected.json()["visualDirection"]["selectedDirectionId"] == "cinematic_research"
 
+    retried = client.post(
+        "/api/projects/project-visual/visual-directions/select",
+        json={"visualDirectionVersion": 1, "directionId": "cinematic_research"},
+    )
+
+    assert retried.status_code == 200
+    assert retried.json()["version"] == selected.json()["version"]
+    assert retried.json()["visualDirection"] == selected.json()["visualDirection"]
+
 
 def test_chinese_classroom_project_gets_content_aware_visual_directions(client) -> None:
     project = PROJECT | {

@@ -78,14 +78,23 @@ def assemble_slide_deck_route(
             409,
         )
 
+    latest = request.app.state.repository.latest_checkpoint_for_stage(
+        project_id, "slide_deck"
+    )
+    if (
+        latest is not None
+        and latest.status == "confirmed"
+        and latest.payload.get("visualDirectionVersion") == body.visual_direction_version
+    ):
+        response = _checkpoint_response(latest)
+        response["nextStep"] = "render"
+        return response
+
     deck = assemble_slide_deck(
         outline=OutlineDecision(**outline_checkpoint.payload),
         outline_version=outline_checkpoint.version,
         visual=VisualDirectionDecision(**visual_checkpoint.payload),
         visual_direction_version=visual_checkpoint.version,
-    )
-    latest = request.app.state.repository.latest_checkpoint_for_stage(
-        project_id, "slide_deck"
     )
     expected_version = 0 if latest is None else latest.version
     try:

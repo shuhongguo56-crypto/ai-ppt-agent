@@ -126,6 +126,15 @@ def select_visual_direction_route(
     )
     if latest is None:
         raise PublicError("visual_direction_not_found", "Visual direction not found.", 404)
+    latest_decision = VisualDirectionDecision(**latest.payload)
+    if (
+        latest.status == "confirmed"
+        and latest_decision.selected_direction_id == body.direction_id
+        and body.visual_direction_version in {latest.version, latest.version - 1}
+    ):
+        response = _checkpoint_response(latest)
+        response["nextStep"] = "slide_deck"
+        return response
     if latest.version != body.visual_direction_version:
         raise PublicError(
             "checkpoint_version_conflict",
@@ -134,7 +143,7 @@ def select_visual_direction_route(
         )
 
     selected = select_visual_direction(
-        VisualDirectionDecision(**latest.payload),
+        latest_decision,
         body.direction_id,
     )
     try:

@@ -46,8 +46,11 @@ function Start-LocalApi {
     (Join-Path $RepoRoot "packages\contracts\python"),
     (Join-Path $RepoRoot "packages\skills\python")
   ) -join ";"
-  $env:AI_PPT_DATABASE_PATH = "D:\Codex\Workspaces\ai-ppt-agent-runtime\ai-ppt-runtime.db"
-  $env:AI_PPT_ASSET_PATH = "D:\Codex\Workspaces\ai-ppt-agent-runtime\assets"
+  # Keep the public runtime on the repository's established database and asset
+  # store so a supervisor restart never makes an in-progress customer project
+  # appear to disappear.
+  $env:AI_PPT_DATABASE_PATH = Join-Path $RepoRoot ".local\ai-ppt.db"
+  $env:AI_PPT_ASSET_PATH = Join-Path $RepoRoot ".local\assets"
   $env:AI_PPT_MODEL_BACKEND = "cascade"
   $env:AI_PPT_IMAGE_SEARCH_ENABLED = "true"
   $env:AI_PPT_POLLINATIONS_IMAGE_ENABLED = "true"

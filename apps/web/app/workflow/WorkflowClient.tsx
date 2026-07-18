@@ -391,15 +391,33 @@ function connectionErrorMessage(caught: unknown) {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${apiBase()}${path}`, {
-    ...init,
-    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `请求失败：${response.status}`);
+  const retryDelays = [0, 900, 2200, 4500];
+  let lastError: unknown;
+  for (const delay of retryDelays) {
+    if (delay) {
+      await new Promise((resolve) => window.setTimeout(resolve, delay));
+    }
+    try {
+      const response = await fetch(`${apiBase()}${path}`, {
+        ...init,
+        headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        if ([502, 503, 504, 520, 521, 522, 523, 524].includes(response.status) && delay !== retryDelays.at(-1)) {
+          lastError = new Error(text || `服务暂时不可用：${response.status}`);
+          continue;
+        }
+        throw new Error(text || `请求失败：${response.status}`);
+      }
+      return (await response.json()) as T;
+    } catch (caught) {
+      const isNetworkFailure = caught instanceof TypeError || (caught instanceof Error && caught.message.toLowerCase().includes("failed to fetch"));
+      if (!isNetworkFailure || delay === retryDelays.at(-1)) throw caught;
+      lastError = caught;
+    }
   }
-  return (await response.json()) as T;
+  throw lastError instanceof Error ? lastError : new Error("网络连接暂时中断，请重试。");
 }
 
 async function resolveProjectImages(
@@ -1120,6 +1138,11 @@ export default function WorkflowClient() {
           body: JSON.stringify({ visualDirectionVersion: state.visualVersion, directionId: direction.directionId }),
         }),
       );
+      setState((current) => ({
+        ...current,
+        visualVersion: selected.version,
+        visualDecision: selected.visualDirection,
+      }));
 
       const deck = await step("逐页设计", "按每页内容规划构图、层级、配图与动效，并组装统一 SlideDeck JSON", () =>
         request<{ version: number; slideDeck: SlideDeck }>(`/projects/${state.projectId}/slide-deck/assemble`, {
@@ -1134,6 +1157,13 @@ export default function WorkflowClient() {
         "逐页设计",
         `已为 ${deck.slideDeck.slides.length} 页分别规划版式，共使用 ${compositionCount} 种构图；PPTX 和 HTML 共用这份 JSON。`,
       );
+      setState((current) => ({
+        ...current,
+        visualVersion: selected.version,
+        visualDecision: selected.visualDirection,
+        slideDeck: deck.slideDeck,
+        slideDeckVersion: deck.version,
+      }));
 
       const resolvedImages = await step("Image Agent", "先联网搜图；搜不到时调用已配置的生图 provider，并保留本地视觉兜底", () =>
         resolveProjectImages(state.projectId!, deck.version, "auto"),

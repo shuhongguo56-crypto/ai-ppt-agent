@@ -596,3 +596,12 @@ Completed on 2026-07-18:
 - Runtime state and logs are stored under `D:\Codex\Workspaces\ai-ppt-public-runtime`; no provider keys are committed.
 - The intended Windows scheduled task runs the supervisor every five minutes, so reconnects do not require the customer-facing URL to change.
 - Verification: 357 Python tests passed; Next.js production build and typecheck passed; Git diff whitespace validation passed.
+
+## Visual-selection fetch recovery
+
+- Fixed a public workflow failure where a brief tunnel interruption after visual-direction selection surfaced as the raw browser message `Failed to fetch` even though the selected direction and canonical SlideDeck had already been saved.
+- Customer-facing API requests now retry transient network and Cloudflare 5xx failures with bounded backoff.
+- Visual selection and SlideDeck assembly are idempotent, so retrying a request whose response was lost resumes the same checkpoint instead of creating a conflicting version.
+- The workflow stores the confirmed visual and assembled SlideDeck in client state immediately, before the slower Image Agent phase begins.
+- The public FastAPI runtime was restarted without changing its established database/assets; the affected latest project remained available and its stale-version retry returned the existing selected direction and 8-slide deck successfully.
+- GitHub Pages was rebuilt and deployed with the recovery client.
