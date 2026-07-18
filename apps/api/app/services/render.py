@@ -2212,8 +2212,8 @@ def _image_search_budget(timeout_seconds: float | None = None) -> float:
 def _clip_for_asset(value: str, limit: int) -> str:
     value = re.sub(r"\s+", " ", str(value)).strip()
     if len(value) <= limit:
-        return value
-    return value[: max(0, limit - 1)].rstrip() + "…"
+        return _trim_dangling_visible_text(value)
+    return _smart_clip_visible_text(value, limit)
 
 
 def _contains_cjk(value: str) -> bool:

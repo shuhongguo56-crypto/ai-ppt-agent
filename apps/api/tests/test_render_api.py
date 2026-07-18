@@ -320,6 +320,10 @@ def test_render_visible_text_cleanup_compacts_titles_and_removes_encoding_damage
     )
     assert compact_title == "人工智能在高等教育课程、评价"
     assert not compact_title.endswith("…")
+    assert not render_service._clip_for_asset(
+        "Enterprise image purpose that is deliberately longer than the compact asset description budget",
+        48,
+    ).endswith("…")
 
 
 def test_render_compaction_keeps_required_quoted_business_concept() -> None:

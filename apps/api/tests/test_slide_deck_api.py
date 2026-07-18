@@ -500,6 +500,11 @@ def test_quality_repair_keeps_one_valid_deck_contract_and_increases_visual_varie
         assert "single focal" in lowered
         assert lowered.count("award-winning corporate presentation standard") == 1
     assert all(len(slide.title) <= 54 for slide in repaired.slides)
+    assert all(
+        not re.search(r"(?:…|\.{3})$", block.content.strip())
+        for slide in repaired.slides
+        for block in slide.blocks
+    )
     assert all(slide.design_plan.content_density == "sparse" for slide in repaired.slides)
     assert len({slide.design_plan.composition_archetype for slide in repaired.slides}) == len(
         repaired.slides

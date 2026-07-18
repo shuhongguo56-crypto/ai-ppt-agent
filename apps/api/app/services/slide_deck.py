@@ -454,7 +454,7 @@ def _repair_visible_copy(value: str, limit: int) -> str:
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     if not cleaned:
         cleaned = re.sub(r"\s+", " ", str(value)).strip()
-    return _clip_text(cleaned, limit)
+    return _clip_title_without_ellipsis(cleaned, limit)
 
 
 def _clip_title_without_ellipsis(value: str, limit: int) -> str:
