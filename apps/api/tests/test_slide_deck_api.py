@@ -1,6 +1,6 @@
 import re
 
-from ai_ppt_contracts import SlideDeck
+from ai_ppt_contracts import OutlineDecision, SlideDeck
 from app.services.slide_deck import _condense_slide_title, repair_slide_deck_for_quality
 
 
@@ -512,3 +512,44 @@ def test_quality_repair_keeps_one_valid_deck_contract_and_increases_visual_varie
     assert len({slide.design_plan.image_treatment for slide in repaired.slides}) >= 3
     assert len({slide.design_plan.motion_preset for slide in repaired.slides}) >= 3
     assert repaired.export_targets == ["pptx", "hyperframes_html"]
+
+
+def test_quality_repair_rehydrates_copy_from_confirmed_outline(client) -> None:
+    create_project(client)
+    outline_response = confirm_outline(client)
+    visual = select_visual(client, outline_response["version"])
+    assembled = assemble_deck(client, visual["version"])
+    assert assembled.status_code == 200
+
+    outline_payload = outline_response["outlineDecision"]
+    outline_payload["slides"][5]["title"] = (
+        "Act on: translate the conclusion into steps Executive leadership can repeat and verify"
+    )
+    outline_payload["slides"][5]["keyPoint"] = (
+        "Executive leadership can repeat, distinguish and verify the complete operating sequence"
+    )
+    deck_payload = assembled.json()["slideDeck"]
+    deck_payload["slides"][5]["title"] = "Act on: translate the conclusion into ste"
+    deck_payload["slides"][5]["blocks"][0]["content"] = deck_payload["slides"][5]["title"]
+    key_point_block = next(
+        block
+        for block in deck_payload["slides"][5]["blocks"]
+        if block["blockId"].endswith("-key-point")
+    )
+    key_point_block["content"] = "Executive leadership can repeat, di"
+
+    repaired, _ = repair_slide_deck_for_quality(
+        deck=SlideDeck(**deck_payload),
+        outline=OutlineDecision(**outline_payload),
+        failed_check_names=["pptx_visible_copy_completeness"],
+        repair_pass=2,
+    )
+
+    slide = repaired.slides[5]
+    assert slide.title.startswith("Act on: translate the conclusion into steps")
+    assert not slide.title.endswith("ste")
+    repaired_key_point = next(
+        block for block in slide.blocks if block.block_id.endswith("-key-point")
+    )
+    assert "repeat, distinguish and verify" in repaired_key_point.content
+    assert not repaired_key_point.content.endswith("di")

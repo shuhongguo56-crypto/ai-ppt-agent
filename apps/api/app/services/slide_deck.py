@@ -202,6 +202,7 @@ def repair_slide_deck_for_quality(
     deck: SlideDeck,
     failed_check_names: list[str],
     repair_pass: int = 1,
+    outline: OutlineDecision | None = None,
 ) -> tuple[SlideDeck, list[str]]:
     """Create a new canonical deck version that addresses deterministic QA failures.
 
@@ -265,15 +266,31 @@ def repair_slide_deck_for_quality(
     previous_archetype: str | None = None
     used_repair_archetypes: set[str] = set()
     full_bleed_repair_count = 0
+    outline_slides = (
+        {slide.slide_index: slide for slide in outline.slides}
+        if outline is not None
+        else {}
+    )
     for slide_payload in payload["slides"]:
         slide_index = int(slide_payload["slideIndex"])
+        outline_slide = outline_slides.get(slide_index)
         if text_repair:
-            repaired_title = _condense_slide_title(slide_payload["title"], language)
+            source_title = (
+                outline_slide.title
+                if outline_slide is not None
+                else slide_payload["title"]
+            )
+            repaired_title = _condense_slide_title(source_title, language)
             repaired_title = _clip_title_without_ellipsis(repaired_title, title_limit)
             slide_payload["title"] = repaired_title
             if slide_payload.get("subtitle"):
+                source_subtitle = (
+                    outline_slide.subtitle
+                    if outline_slide is not None and outline_slide.subtitle
+                    else slide_payload["subtitle"]
+                )
                 slide_payload["subtitle"] = _repair_visible_copy(
-                    slide_payload["subtitle"], subtitle_limit
+                    source_subtitle, subtitle_limit
                 )
             seen_visible: set[str] = set()
             repaired_blocks: list[dict] = []
@@ -283,16 +300,22 @@ def repair_slide_deck_for_quality(
                 if block_type == "headline":
                     block["content"] = repaired_title
                 elif block_type == "subtitle":
+                    source_content = (
+                        outline_slide.subtitle
+                        if outline_slide is not None and outline_slide.subtitle
+                        else block["content"]
+                    )
                     block["content"] = _repair_visible_copy(
-                        block["content"], subtitle_limit
+                        source_content, subtitle_limit
                     )
                 elif block_type in {"body", "card"}:
                     if block_type == "card":
                         card_count += 1
                         if card_count > (3 if repair_pass >= 2 else 4):
                             continue
+                    source_content = _outline_source_for_block(block, outline_slide)
                     block["content"] = _repair_visible_copy(
-                        block["content"], card_limit if block_type == "card" else body_limit
+                        source_content, card_limit if block_type == "card" else body_limit
                     )
                     fingerprint = _title_fingerprint(block["content"])
                     if fingerprint and fingerprint in seen_visible:
@@ -410,6 +433,20 @@ def repair_slide_deck_for_quality(
     if image_repair:
         repairs.append("page_specific_image_intent")
     return SlideDeck(**payload), repairs
+
+
+def _outline_source_for_block(block: dict, outline_slide) -> str:
+    if outline_slide is None:
+        return str(block["content"])
+    block_id = str(block.get("blockId", ""))
+    if block_id.endswith("-key-point"):
+        return str(outline_slide.key_point)
+    point_match = re.search(r"-point-(\d+)$", block_id)
+    if point_match:
+        point_index = int(point_match.group(1)) - 1
+        if 0 <= point_index < len(outline_slide.talking_points):
+            return str(outline_slide.talking_points[point_index])
+    return str(block["content"])
 
 
 _AWARD_IMAGE_PROMPT_CONTRACT = (

@@ -369,7 +369,7 @@ def check_render_quality(
                 "detail": (
                     "PPTX visible copy contains no renderer-truncated phrases."
                     if not pptx_completeness_issues
-                    else "PPTX contains visibly truncated copy ending in ellipses: "
+                    else "PPTX contains visibly truncated copy or dangling partial words: "
                     + ", ".join(pptx_completeness_issues[:6])
                     + "."
                 ),
@@ -482,7 +482,7 @@ def check_render_quality(
                 "detail": (
                     "HTML visible copy contains no renderer-truncated phrases."
                     if not html_completeness_issues
-                    else "HTML contains visibly truncated copy ending in ellipses: "
+                    else "HTML contains visibly truncated copy or dangling partial words: "
                     + ", ".join(html_completeness_issues[:6])
                     + "."
                 ),
@@ -802,7 +802,7 @@ def _competition_copy_density_check(slide_deck: SlideDeck) -> dict[str, str]:
         total_chars = sum(len(block.content.strip()) for block in visible_blocks)
         longest_block = max((len(block.content.strip()) for block in visible_blocks), default=0)
         title_limit = 34 if re.search(r"[\u3400-\u9fff]", slide.title) else 62
-        if re.search(r"(?:…|\.{3})$", slide.title.strip()):
+        if _visible_copy_looks_truncated(slide.title):
             issues.append(f"slide {slide.slide_index} title is visibly truncated")
         if len(slide.title) > title_limit:
             issues.append(f"slide {slide.slide_index} title too long")
@@ -1574,7 +1574,7 @@ def _pptx_terminal_ellipsis_issues(path: Path) -> list[str]:
             xml = archive.read(name).decode("utf-8", errors="ignore")
             for raw_text in re.findall(r"<a:t>(.*?)</a:t>", xml, flags=re.DOTALL):
                 visible = html.unescape(raw_text).strip()
-                if re.search(r"(?:…|\.{3})$", visible):
+                if _visible_copy_looks_truncated(visible):
                     issues.append(f"{slide_label} '{visible[:48]}'")
     return issues
 
@@ -1597,9 +1597,67 @@ def _html_terminal_ellipsis_issues(path: Path) -> list[str]:
     issues: list[str] = []
     for raw_text in re.findall(r">([^<>]+)<", source, flags=re.DOTALL):
         visible = re.sub(r"\s+", " ", html.unescape(raw_text)).strip()
-        if visible and re.search(r"(?:…|\.{3})$", visible):
+        if visible and _visible_copy_looks_truncated(visible):
             issues.append(f"'{visible[:48]}'")
     return issues
+
+
+def _visible_copy_looks_truncated(value: str) -> bool:
+    visible = re.sub(r"\s+", " ", str(value)).strip()
+    if not visible:
+        return False
+    if re.search(r"(?:…|\.{3})", visible):
+        return True
+    last_word_match = re.search(r"\b([a-z]{1,3})$", visible)
+    if not last_word_match:
+        return False
+    allowed_short_terms = {
+        "ai",
+        "api",
+        "app",
+        "b2b",
+        "b2c",
+        "crm",
+        "erp",
+        "kpi",
+        "roi",
+        "sem",
+        "seo",
+        "vs",
+        "web",
+        "map",
+        "new",
+        "now",
+        "how",
+        "why",
+        "use",
+        "buy",
+        "gap",
+        "top",
+        "one",
+        "two",
+        "six",
+        "ten",
+        "low",
+        "mid",
+        "key",
+        "per",
+        "via",
+        "may",
+        "can",
+        "the",
+        "and",
+        "for",
+        "to",
+        "of",
+        "in",
+        "on",
+        "by",
+        "as",
+        "at",
+        "or",
+    }
+    return last_word_match.group(1) not in allowed_short_terms
 
 
 def _text_encoding_issues(value: str) -> list[str]:

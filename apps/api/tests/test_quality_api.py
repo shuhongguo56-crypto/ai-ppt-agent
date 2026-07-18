@@ -142,6 +142,9 @@ def test_terminal_ellipsis_quality_checks_inspect_final_artifacts(tmp_path) -> N
 
     assert quality_service._pptx_terminal_ellipsis_issues(pptx_path)
     assert quality_service._html_terminal_ellipsis_issues(html_path)
+    assert quality_service._visible_copy_looks_truncated("translate the conclusion into ste")
+    assert quality_service._visible_copy_looks_truncated("repeat, di")
+    assert not quality_service._visible_copy_looks_truncated("Enterprise evidence map")
 
 
 def test_quality_check_reports_failed_artifact_safely(client, tmp_path) -> None:

@@ -172,10 +172,19 @@ def repair_slide_deck_route(
         )
 
     failed_names = [check.name for check in report.checks if check.status == "failed"]
+    outline_checkpoint = request.app.state.repository.latest_checkpoint_for_stage(
+        project_id, "outline"
+    )
+    outline = (
+        OutlineDecision(**outline_checkpoint.payload)
+        if outline_checkpoint is not None
+        else None
+    )
     repaired_deck, applied_repairs = repair_slide_deck_for_quality(
         deck=SlideDeck(**deck_checkpoint.payload),
         failed_check_names=failed_names,
         repair_pass=body.repair_pass,
+        outline=outline,
     )
     try:
         checkpoint = request.app.state.repository.put_checkpoint(
