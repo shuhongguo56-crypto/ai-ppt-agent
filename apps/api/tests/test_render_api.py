@@ -218,7 +218,7 @@ def test_ai_image_prompt_varies_safe_abstract_scene_by_slide() -> None:
     assert "Variant " in second_prompt
 
 
-def test_all_supported_image_types_use_no_text_physical_scenes() -> None:
+def test_supported_image_types_keep_semantic_subjects_and_no_text_contract() -> None:
     for image_type in render_service.IMAGE_SEARCH_FALLBACK_QUERIES:
         prompt = render_service._ai_image_generation_prompt(
             slide_index=2,
@@ -235,10 +235,12 @@ def test_all_supported_image_types_use_no_text_physical_scenes() -> None:
             palette=["#0F5132", "#F6F2E8"],
         )
         lowered = prompt.casefold()
-        assert "abstract still life" in lowered
-        assert "slide title" not in lowered
-        assert "presentation visual" not in lowered
-        assert "no visible text" in lowered
+        if image_type in {"classical_element", "data_visual", "icon_illustration"}:
+            assert "abstract still life" in lowered
+            assert "slide title" not in lowered
+        else:
+            assert "concrete semantic subject" in lowered
+        assert "absolutely no visible text" in lowered
 
 
 def create_renderable_deck(client) -> dict:
@@ -700,7 +702,7 @@ def test_electric_vehicle_search_adds_short_english_queries_early() -> None:
     )
 
     assert "modern electric vehicle showroom" in queries[:4]
-    assert "electric vehicle design studio" in queries[:4]
+    assert "modern electric vehicle design studio" in queries[:4]
 
 
 def test_electric_vehicle_search_uses_slide_intent_before_generic_topic() -> None:
@@ -735,6 +737,50 @@ def test_openverse_ranking_prefers_specific_non_textual_metadata() -> None:
     assert render_service._openverse_metadata_has_text_risk(generic) is True
 
 
+def test_licensed_candidate_requires_page_specific_relevance() -> None:
+    assert render_service._candidate_metadata_is_relevant(
+        "Electric vehicle factory production line",
+        "electric vehicle factory production line",
+    ) is True
+    assert render_service._candidate_metadata_is_relevant(
+        "1989 Aston Martin V8 Vantage Volante",
+        "electric vehicle factory production line",
+    ) is False
+    assert render_service._candidate_metadata_is_relevant(
+        "PACKARD 120 CONVERTIBLE COUPE (1939)",
+        "modern electric vehicle showroom",
+    ) is False
+    assert render_service._candidate_metadata_is_relevant(
+        "Renault Twizy electric microcar",
+        "automotive battery manufacturing",
+    ) is False
+    assert render_service._candidate_metadata_is_relevant(
+        "electric vehicle battery concept car",
+        "automotive battery manufacturing",
+    ) is False
+    assert render_service._candidate_metadata_is_relevant(
+        "automotive battery manufacturing factory production line",
+        "automotive battery manufacturing",
+    ) is True
+
+
+def test_premium_statement_ends_on_a_complete_claim() -> None:
+    statement = render_service._premium_statement_copy(
+        "下一阶段优势不只取决于做大规模，更取决于能否落实。企业需要从规模扩张切换到可持续利润。"
+    )
+
+    assert statement == "下一阶段优势不只取决于做大规模，更取决于能否落实"
+
+
+def test_premium_statement_collapses_nested_quote_into_complete_claim() -> None:
+    statement = render_service._premium_statement_copy(
+        "下一阶段优势不只取决于做大规模，更取决于能否落实‘企业需要从规模扩张切换到可持续利润’"
+    )
+
+    assert statement == "下一阶段优势不只取决于做大规模，更取决于能否落实战略转向"
+    assert not statement.endswith("规模扩")
+
+
 def test_visible_text_scan_rejects_large_web_asset(monkeypatch, tmp_path) -> None:
     image_path = tmp_path / "labelled.jpg"
     image_path.write_bytes(b"0" * (9 * 1024))
@@ -742,7 +788,9 @@ def test_visible_text_scan_rejects_large_web_asset(monkeypatch, tmp_path) -> Non
     monkeypatch.setattr(
         render_service.subprocess,
         "run",
-        lambda *_args, **_kwargs: SimpleNamespace(stdout="Electric Vehicle Charging Station"),
+        lambda *_args, **_kwargs: SimpleNamespace(
+            stdout="Electric Vehicle Charging Station Business Strategy Performance Report"
+        ),
     )
 
     assert render_service._image_has_excessive_visible_text(image_path) is True

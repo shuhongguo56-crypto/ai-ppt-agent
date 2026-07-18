@@ -34,6 +34,30 @@ OPEN_WEB_TEXT_RISK_TERMS = {
     "watermark",
     "wordmark",
 }
+SCENE_INTENT_TERMS = {
+    "battery",
+    "charging",
+    "city",
+    "collaboration",
+    "consumer",
+    "design",
+    "driver",
+    "factory",
+    "home",
+    "laboratory",
+    "library",
+    "manufacturing",
+    "meeting",
+    "mobility",
+    "modern",
+    "production",
+    "research",
+    "road",
+    "showroom",
+    "studio",
+    "students",
+    "team",
+}
 SLIDE_CX = 12192000
 SLIDE_CY = 6858000
 FOREGROUND_SAFE_X = 460000
@@ -405,6 +429,15 @@ def _read_cached_visual_asset(
     source_type = str(data.get("sourceType") or "cached_visual_asset")
     if source_type in {"local_svg_fallback", "safe_vector_fallback", "local_deterministic_image"}:
         return None
+    cached_query = str(data.get("query") or "")
+    cached_attribution = str(data.get("attribution") or "")
+    if source_type in {
+        "bing_image_search",
+        "wikipedia_page_image",
+        "wikimedia_commons_search",
+        "openverse_search",
+    } and not _candidate_metadata_is_relevant(cached_attribution, cached_query):
+        return None
     if not file_name or "/" in file_name or "\\" in file_name:
         return None
     path = assets_dir / file_name
@@ -420,7 +453,7 @@ def _read_cached_visual_asset(
         mime_type=str(data.get("mimeType") or "image/png"),
         source_type=source_type,
         alt=str(data.get("alt") or _asset_alt(slide_index, str(data.get("query") or ""))),
-        query=str(data.get("query") or ""),
+        query=cached_query,
         image_type=str(data.get("imageType") or image_type),
         purpose=str(data.get("purpose") or purpose),
         prompt=str(data.get("prompt") or prompt),
@@ -532,6 +565,12 @@ def _search_openverse_visual_asset(
             reverse=True,
         )
         for item in ordered:
+            if "modern" in query.casefold() and not _candidate_metadata_is_relevant(
+                str(item.get("title") or ""), query
+            ):
+                continue
+            if not _candidate_metadata_is_relevant(_openverse_candidate_metadata(item), query):
+                continue
             if _openverse_metadata_has_text_risk(item):
                 continue
             width = int(item.get("width") or 0)
@@ -592,14 +631,7 @@ def _openverse_candidate_score(item: dict, query: str) -> int:
     generic road photo or an unrelated branded product shot.
     """
 
-    metadata_parts = [str(item.get("title") or "")]
-    tags = item.get("tags") or []
-    for tag in tags:
-        if isinstance(tag, dict):
-            metadata_parts.append(str(tag.get("name") or ""))
-        else:
-            metadata_parts.append(str(tag))
-    metadata = " ".join(metadata_parts).casefold()
+    metadata = _openverse_candidate_metadata(item).casefold()
     tokens = [
         token
         for token in re.findall(r"[a-z0-9]{3,}", query.casefold())
@@ -630,6 +662,56 @@ def _openverse_candidate_score(item: dict, query: str) -> int:
     if _openverse_metadata_has_text_risk(item):
         score -= 40
     return score
+
+
+def _openverse_candidate_metadata(item: dict) -> str:
+    metadata_parts = [str(item.get("title") or "")]
+    for tag in item.get("tags") or []:
+        if isinstance(tag, dict):
+            metadata_parts.append(str(tag.get("name") or ""))
+        else:
+            metadata_parts.append(str(tag))
+    return " ".join(metadata_parts)
+
+
+def _minimum_candidate_relevance_score(query: str) -> int:
+    tokens = {
+        token
+        for token in re.findall(r"[a-z0-9]{3,}", query.casefold())
+        if token
+        not in {
+            "and",
+            "for",
+            "from",
+            "image",
+            "no",
+            "photo",
+            "presentation",
+            "real",
+            "scene",
+            "text",
+            "the",
+            "with",
+            "world",
+        }
+    }
+    if len(tokens) >= 2:
+        return 10
+    if tokens:
+        return 5
+    return 0
+
+
+def _candidate_metadata_is_relevant(metadata: str, query: str) -> bool:
+    if not query.strip():
+        return True
+    metadata_lower = metadata.casefold()
+    query_tokens = set(re.findall(r"[a-z0-9]{3,}", query.casefold()))
+    scene_intents = query_tokens & SCENE_INTENT_TERMS
+    if scene_intents and not all(intent in metadata_lower for intent in scene_intents):
+        return False
+    item = {"title": metadata, "tags": [], "width": 0, "height": 0}
+    return _openverse_candidate_score(item, query) >= _minimum_candidate_relevance_score(query)
 
 
 def _openverse_metadata_has_text_risk(item: dict) -> bool:
@@ -663,21 +745,38 @@ def _image_has_excessive_visible_text(path: Path) -> bool:
     executable = shutil.which("tesseract")
     if not executable:
         return False
+    command = [executable, str(path), "stdout", "--psm", "11", "-l", "eng"]
+    if Path(executable).suffix.casefold() in {".bat", ".cmd"}:
+        command = [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/c", *command]
+    subprocess_env = os.environ.copy()
+    if not subprocess_env.get("TESSDATA_PREFIX"):
+        tessdata_candidates = [
+            Path(os.getenv("AI_PPT_TESSDATA_PATH", "")),
+            Path("D:/Codex/Downloads/tessdata"),
+            Path(".local/tessdata").resolve(),
+        ]
+        for tessdata_dir in tessdata_candidates:
+            if str(tessdata_dir) and (tessdata_dir / "eng.traineddata").is_file():
+                subprocess_env["TESSDATA_PREFIX"] = str(tessdata_dir)
+                break
     try:
         result = subprocess.run(
-            [executable, str(path), "stdout", "--psm", "11", "-l", "eng"],
+            command,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="ignore",
             timeout=8,
             check=False,
+            env=subprocess_env,
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
-    scanned = re.sub(r"[^a-z0-9]", "", result.stdout.casefold())
+    scanned = "".join(re.findall(r"[a-z0-9]{3,}", (result.stdout or "").casefold()))
     try:
-        threshold = int(os.getenv("AI_PPT_IMAGE_TEXT_SCAN_MIN_CHARS", "18"))
+        threshold = int(os.getenv("AI_PPT_IMAGE_TEXT_SCAN_MIN_CHARS", "40"))
     except ValueError:
-        threshold = 18
+        threshold = 40
     return len(scanned) >= max(8, min(threshold, 80))
 
 
@@ -711,6 +810,8 @@ def _search_wikipedia_page_visual_asset(
             pages = (payload.get("query") or {}).get("pages") or {}
             for page in pages.values():
                 if not isinstance(page, dict):
+                    continue
+                if not _candidate_metadata_is_relevant(str(page.get("title") or ""), query):
                     continue
                 image_url = str(
                     ((page.get("original") or {}).get("source"))
@@ -788,6 +889,16 @@ def _search_commons_visual_asset(
         pages = (payload.get("query") or {}).get("pages") or {}
         for page in pages.values():
             for image_info in page.get("imageinfo") or []:
+                candidate_metadata = " ".join(
+                    part
+                    for part in (
+                        str(page.get("title") or ""),
+                        _commons_attribution(image_info) or "",
+                    )
+                    if part
+                )
+                if not _candidate_metadata_is_relevant(candidate_metadata, query):
+                    continue
                 mime_type = str(image_info.get("mime") or "")
                 if mime_type not in {"image/jpeg", "image/png"}:
                     continue
@@ -861,6 +972,14 @@ def _search_bing_visual_asset(
         )
         for item in payload.get("value") or []:
             if not isinstance(item, dict):
+                continue
+            if not _candidate_metadata_is_relevant(
+                " ".join(
+                    str(item.get(key) or "")
+                    for key in ("name", "hostPageDisplayUrl", "hostPageUrl")
+                ),
+                query,
+            ):
                 continue
             image_url = str(item.get("contentUrl") or "")
             if not image_url.lower().startswith(("http://", "https://")):
@@ -995,6 +1114,15 @@ def _ai_image_generation_prompt(
     direction_name: str,
     palette: list[str],
 ) -> str:
+    semantic_cues = " ".join(
+        part for part in (query, slide_title, slide_intent, purpose) if part
+    )
+    semantic_queries = _cross_language_image_queries(semantic_cues, image_type)
+    semantic_subject = _ai_semantic_subject(
+        semantic_cues,
+        purpose,
+        semantic_queries[0] if semantic_queries else query,
+    )
     if _is_text_risk_image_type(image_type) or _has_text_risk_visual_cues(
         query,
         image_prompt,
@@ -1021,31 +1149,44 @@ def _ai_image_generation_prompt(
             "The visual supports the idea only through atmosphere, metaphor, material texture, light, and depth."
         )
     return (
-        f"{image_prompt}. "
-        "Create a premium 16:9 presentation visual for a slide. "
-        "Use only the supplied user/source-grounded deck cues. "
+        "Create a premium cinematic 16:9 editorial photograph, not a graphic layout. "
+        f"Concrete semantic subject that must be clearly visible: {semantic_subject}. "
+        "Show a real physical scene with a clear focal subject, natural spatial depth, and believable materials. "
         "ABSOLUTELY NO visible text, letters, numbers, UI screenshots, browser windows, logos, badges, watermarks, menus, or fake document pages. "
+        "No digital devices, data graphics, or pseudo-writing. "
         "Do not create dashboards, charts with labels, app screens, web pages, interface panels, posters, signs, documents, book pages, product labels, packaging labels, menu boards, storefront signage, or any surface that could contain readable or pseudo-readable writing. "
-        "If showing products or business scenes, use blank unbranded objects and clean physical metaphors only. "
-        "Prefer content-supporting photography, abstract 3D objects, symbolic still-life scenes, natural materials, light, depth, and clean geometry. "
-        "The image must be a clean content-supporting photograph/abstract scene with generous empty space. "
-        f"Image type: {image_type}. Purpose: {purpose}. "
-        f"Slide title: {slide_title}. Visual intent: {slide_intent}. "
-        f"Asset role: {asset_role}. Page composition: {composition_archetype}. "
-        f"Image treatment: {image_treatment}. "
-        f"Selected art direction: {direction_name}. Palette: {', '.join(palette)}. "
-        f"Image search query that failed or needs fallback: {query}. "
-        "Style: cinematic but clean, professional, layered foreground/midground/background, "
-        "clear negative space for PPT text, suitable for editable PowerPoint and dynamic HyperFrames HTML."
+        "Use unbranded products and authentic people or environments only when they serve the semantic subject. "
+        f"Palette: {', '.join(palette)}. "
+        "Style: award-grade editorial photography, cinematic but clean, professional, layered foreground/midground/background, "
+        "premium lighting, restrained color, no collage, no infographic, no typography, and generous negative space."
     )
 
 
+def _ai_semantic_subject(cues: str, purpose: str, fallback: str) -> str:
+    lowered = cues.casefold()
+    is_electric_vehicle = any(
+        marker in lowered
+        for marker in ("新能源汽车", "电动汽车", "electric vehicle", "electric car")
+    )
+    if not is_electric_vehicle:
+        return fallback
+    electric_vehicle_scenes = {
+        "cover": "a modern unbranded electric vehicle hero in a premium urban showroom",
+        "agenda": "an advanced electric vehicle battery factory with robotic assembly equipment",
+        "context": "a modern electric vehicle production line showing industrial capability",
+        "framework": "a driver using a clean home electric vehicle charging point",
+        "evidence": "an electric vehicle engineering laboratory testing battery technology",
+        "insight": "a premium electric vehicle moving through a modern city at blue hour",
+        "recommendation": "an automotive engineering team inspecting an unbranded electric vehicle prototype",
+        "conclusion": "a future-ready electric vehicle on an open road at sunrise",
+    }
+    return electric_vehicle_scenes.get(purpose, fallback)
+
+
 def _is_text_risk_image_type(image_type: str) -> bool:
-    # Free image models frequently turn words such as "slide", "report", or
-    # "classroom" into fake typography. Keep every supported PPT asset type on
-    # the concrete no-text scene path; unknown custom types retain the generic
-    # provider prompt for compatibility.
-    return image_type in IMAGE_SEARCH_FALLBACK_QUERIES
+    # Symbolic asset classes stay on the safest no-text still-life path. Scene
+    # and product classes use a concrete editorial-photo prompt plus OCR gate.
+    return image_type in {"classical_element", "data_visual", "icon_illustration"}
 
 
 def _safe_image_environment_hint(image_type: str) -> str:
@@ -1423,6 +1564,8 @@ def _image_search_queries(query: str, image_type: str) -> list[str]:
 
 def _cross_language_image_queries(query: str, image_type: str) -> list[str]:
     lowered = query.casefold()
+    if "新能源汽车" in lowered:
+        lowered = f"{lowered} electric vehicle"
     if any(marker in lowered for marker in ("新能源汽车", "新能源车", "电动汽车", "electric vehicle", "electric car")):
         if any(
             marker in lowered
@@ -1438,7 +1581,7 @@ def _cross_language_image_queries(query: str, image_type: str) -> list[str]:
             for marker in ("\u7528\u6237", "\u9700\u6c42", "\u51b3\u7b56", "\u4f53\u9a8c", "customer", "consumer", "demand", "experience")
         ):
             return [
-                "electric car driver on road",
+                "modern electric car driver on road",
                 "electric vehicle charging at home",
                 "electric car urban mobility",
             ]
@@ -1448,8 +1591,8 @@ def _cross_language_image_queries(query: str, image_type: str) -> list[str]:
         ):
             return [
                 "modern electric vehicle showroom",
-                "electric car city street",
-                "electric vehicle design studio",
+                "modern electric car city street",
+                "modern electric vehicle design studio",
             ]
         if any(
             marker in lowered
@@ -3549,9 +3692,9 @@ def _customer_delivery_layout(slide, blocks: list, fg: str, accent: str, soft: s
         center = _shape(40, "roundRect", 2180000, 2500000, 2600000, 1050000, "FFFFFF", alpha=95000, line=accent)
         center_text = _text_shape(41, lead, 2450000, 2810000, 2060000, 390000, _ppt_statement_font_size(lead, compact=True), fg, bold=True, align="ctr")
         node_positions = [
-            (650000, 1780000, 1500000, 620000),
-            (4900000, 1780000, 1420000, 620000),
-            (650000, 4140000, 1500000, 620000),
+            (650000, 1780000, 1900000, 620000),
+            (4580000, 1780000, 1740000, 620000),
+            (650000, 4140000, 1900000, 620000),
         ]
         nodes = [
             _premium_card_shape(42 + index, block.content, x, y, cx, cy, soft, fg, accent)
@@ -3691,10 +3834,21 @@ def _ppt_statement_font_size(text: str, *, compact: bool = False) -> int:
 
 def _premium_statement_copy(value: str) -> str:
     text = _clean_visible_text(value, role="body", clip=False)
+    for quote in ("‘", "“", "《"):
+        if quote not in text:
+            continue
+        prefix = text.split(quote, 1)[0].rstrip(" \t\r\n，。；：、,:;.-—–")
+        text = f"{prefix}战略转向" if prefix.endswith("能否落实") else prefix
+        break
+    text = _presentation_clause(text)
+    if _contains_cjk(text) and len(text) > 34:
+        for marker in ("，", "；", "。"):
+            head = text.split(marker, 1)[0].strip()
+            if 12 <= len(head) <= 34:
+                text = head
+                break
     limit = 34 if _contains_cjk(text) else 82
-    return _strip_terminal_ellipsis(
-        _smart_clip_visible_text(text, limit).strip(" \t\r\n锛屻€傦紱锛氥€?:;-鈥斺€?")
-    )
+    return _smart_clip_visible_text(text, limit).strip(" \t\r\n锛屻€傦紱锛氥€?:;-鈥斺€?")
 
 
 def _premium_card_copy(value: str) -> str:
