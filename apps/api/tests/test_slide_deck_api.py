@@ -101,6 +101,8 @@ def test_assemble_slide_deck_from_confirmed_outline_and_visual_direction(client)
         assert slide["title"] in image_item["prompt"]
         assert slide["designPlan"]["assetRole"] in image_item["purpose"]
         assert "decorative" not in image_item["purpose"].lower()
+        assert "award-winning" in image_item["prompt"].lower()
+        assert "single focal" in image_item["prompt"].lower()
     assert deck["slides"][0]["blocks"][0]["blockType"] == "headline"
     assert all(
         any(block["blockType"] == "image_placeholder" for block in slide["blocks"])

@@ -150,7 +150,7 @@ def _prompt(
     image_treatment: str,
     composition: str,
 ) -> str:
-    prompt_parts = [
+    semantic_parts = [
         "premium 16:9 presentation visual for PPT and HyperFrames",
         f"image type: {image_type}",
         f"slide title: {_clean_title_intent(title)}",
@@ -162,13 +162,19 @@ def _prompt(
         f"art direction: {_clean(direction_name)}",
         IMAGE_TYPE_HINTS[image_type],
         "content-serving visual, explain the slide idea rather than decorating it",
-        "award-winning corporate presentation standard, brand-uniform, balanced, judge-ready",
-        "premium keynote quality, layered foreground/midground/background, cinematic depth",
-        "strong contrast hierarchy with deliberate negative space and a single focal subject",
-        "no visible text, no labels, no logos, no watermark",
-        "leave clean negative space for editable PowerPoint text and cards",
     ]
-    return _clip_prompt_text(" | ".join(part for part in prompt_parts if part), 1000)
+    semantic_body = _clip_prompt_text(
+        " | ".join(part for part in semantic_parts if part),
+        690,
+    ).strip(" |")
+    contract = (
+        "award-winning corporate presentation standard, brand-uniform, judge-ready | "
+        "premium keynote quality with layered foreground/midground/background and cinematic depth | "
+        "strong contrast hierarchy, deliberate negative space, and a single focal subject | "
+        "protected clean text zone for editable PowerPoint copy | "
+        "no visible text, no labels, no logos, no watermark"
+    )
+    return f"{semantic_body} | {contract}"
 
 
 def _purpose(*, language: str, asset_role: str, title: str, key_point: str) -> str:

@@ -509,6 +509,16 @@ def _resolve_visual_asset_candidate(
             provider_chain=list(image_item.provider_chain),
         )
     if asset is None and mode != "generate":
+        asset = _recover_prior_version_visual_asset(
+            slide.slide_index,
+            assets_dir,
+            image_type=image_item.image_type,
+            purpose=image_item.purpose,
+            prompt=image_item.prompt,
+            provider_chain=list(image_item.provider_chain),
+            seen_image_hashes=set(),
+        )
+    if asset is None and mode != "generate":
         asset = _search_open_visual_asset(
             slide.slide_index,
             query,
@@ -562,7 +572,7 @@ def _image_generation_retry_rounds() -> int:
         requested = int(raw)
     except ValueError:
         requested = 2
-    return max(0, min(requested, 5))
+    return max(0, min(requested, 3))
 
 
 def _visual_asset_hash(path: Path) -> str:
