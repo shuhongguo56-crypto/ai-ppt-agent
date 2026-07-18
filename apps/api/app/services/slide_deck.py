@@ -265,6 +265,7 @@ def repair_slide_deck_for_quality(
 
     previous_archetype: str | None = None
     used_repair_archetypes: set[str] = set()
+    seen_repair_title_fingerprints: set[str] = set()
     full_bleed_repair_count = 0
     outline_slides = (
         {slide.slide_index: slide for slide in outline.slides}
@@ -275,13 +276,34 @@ def repair_slide_deck_for_quality(
         slide_index = int(slide_payload["slideIndex"])
         outline_slide = outline_slides.get(slide_index)
         if text_repair:
-            source_title = (
-                outline_slide.title
-                if outline_slide is not None
-                else slide_payload["title"]
+            source_title = _repair_title_source(
+                outline_slide=outline_slide,
+                outline=outline,
+                fallback=str(slide_payload["title"]),
+                language=language,
             )
             repaired_title = _condense_slide_title(source_title, language)
             repaired_title = _clip_title_without_ellipsis(repaired_title, title_limit)
+            repaired_fingerprint = _title_fingerprint(repaired_title)
+            if repaired_fingerprint in seen_repair_title_fingerprints and outline_slide is not None:
+                repaired_title = _condense_slide_title(
+                    str(outline_slide.key_point), language
+                )
+                repaired_title = _clip_title_without_ellipsis(
+                    repaired_title, title_limit
+                )
+                repaired_fingerprint = _title_fingerprint(repaired_title)
+            if repaired_fingerprint in seen_repair_title_fingerprints:
+                suffix = f" {slide_index}" if language != "zh" else str(slide_index)
+                repaired_title = (
+                    _clip_title_without_ellipsis(
+                        repaired_title, max(8, title_limit - len(suffix))
+                    )
+                    + suffix
+                )
+                repaired_fingerprint = _title_fingerprint(repaired_title)
+            if repaired_fingerprint:
+                seen_repair_title_fingerprints.add(repaired_fingerprint)
             slide_payload["title"] = repaired_title
             if slide_payload.get("subtitle"):
                 source_subtitle = (
@@ -447,6 +469,77 @@ def _outline_source_for_block(block: dict, outline_slide) -> str:
         if 0 <= point_index < len(outline_slide.talking_points):
             return str(outline_slide.talking_points[point_index])
     return str(block["content"])
+
+
+def _repair_title_source(
+    *,
+    outline_slide,
+    outline: OutlineDecision | None,
+    fallback: str,
+    language: str,
+) -> str:
+    if outline_slide is None:
+        return fallback
+    title = re.sub(r"\s+", " ", str(outline_slide.title)).strip()
+    if not _title_source_is_incomplete(title):
+        return title
+
+    original_head = ""
+    for separator in ("：", ":", "—", "｜", "|"):
+        if separator in title:
+            original_head = title.split(separator, 1)[0].strip()
+            break
+
+    key_point = re.sub(r"\s+", " ", str(outline_slide.key_point)).strip()
+    for _ in range(3):
+        before = key_point
+        key_point = re.sub(
+            r"^(?:Question|Insight|Evidence|Conclusion|Recommendation)\s*[：:]\s*",
+            "",
+            key_point,
+            flags=re.IGNORECASE,
+        )
+        key_point = re.sub(
+            r"^Action(?:\s+priority\s+\d+)?(?:\s+for\s+[^:：]+)?\s*[：:]\s*",
+            "",
+            key_point,
+            flags=re.IGNORECASE,
+        )
+        if key_point == before:
+            break
+    if outline is not None and outline.audience:
+        key_point = re.sub(
+            rf"\s+{re.escape(outline.audience)}\s+can\b.*$",
+            "",
+            key_point,
+            flags=re.IGNORECASE,
+        )
+    action_match = re.search(
+        r"translate the conclusion into steps", key_point, flags=re.IGNORECASE
+    )
+    if action_match:
+        key_point = action_match.group(0)
+    include_match = re.match(r"(.+?)\s+include(?:s)?\b", key_point, flags=re.IGNORECASE)
+    if include_match:
+        key_point = include_match.group(1).strip()
+    question_match = re.match(
+        r"What does (.+?) actually change\b", key_point, flags=re.IGNORECASE
+    )
+    if question_match:
+        key_point = question_match.group(1).strip()
+
+    if original_head and key_point:
+        separator = "：" if language == "zh" else ": "
+        return f"{original_head}{separator}{key_point}"
+    return key_point or fallback
+
+
+def _title_source_is_incomplete(value: str) -> bool:
+    text = str(value).strip()
+    if re.search(r"(?:…|\.{3})", text):
+        return True
+    last_word = re.search(r"\b([a-z]{1,3})$", text)
+    return bool(last_word and last_word.group(1) not in {"ai", "api", "roi", "kpi"})
 
 
 _AWARD_IMAGE_PROMPT_CONTRACT = (

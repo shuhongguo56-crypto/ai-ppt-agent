@@ -522,11 +522,9 @@ def test_quality_repair_rehydrates_copy_from_confirmed_outline(client) -> None:
     assert assembled.status_code == 200
 
     outline_payload = outline_response["outlineDecision"]
-    outline_payload["slides"][5]["title"] = (
-        "Act on: translate the conclusion into steps Executive leadership can repeat and verify"
-    )
+    outline_payload["slides"][5]["title"] = "Act on: translate the conclusion into ste…"
     outline_payload["slides"][5]["keyPoint"] = (
-        "Executive leadership can repeat, distinguish and verify the complete operating sequence"
+        "translate the conclusion into steps Executive leadership can repeat, distinguish and verify"
     )
     deck_payload = assembled.json()["slideDeck"]
     deck_payload["slides"][5]["title"] = "Act on: translate the conclusion into ste"
