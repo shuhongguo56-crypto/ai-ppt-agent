@@ -1,5 +1,20 @@
 # AI PPT Agent Project State
 
+## 2026-07-19 enterprise research delivery closure
+
+- Research mode now supplements sparse user input with topic-relevant public research, authoritative fallback sources, an evidence matrix, explicit inference/risk boundaries, and a decision-oriented argument chain.
+- The verified enterprise storyline uses nine distinct page jobs from executive thesis through gates, measurement model, evidence boundary, 90-day proof path, scale decision, and operating-system close.
+- PPTX and HyperFrames HTML continue to render from the same confirmed `SlideDeck JSON`; system-map pages preserve the center claim plus all four stage nodes instead of dropping the final value node.
+- PowerPoint text fitting now reserves real SimSun/Times New Roman line height, grows frames before clipping complete two-line claims, computes uniform grouped-card heights, and keeps page numbers clear of bottom-right visual assets.
+- Research/enterprise visual assets are page-specific and binary-unique. The final verified deck embeds nine generated raster assets: seven 2048x1152 pages and two 4096x2304 key pages.
+- Final verified project: `enterprise-ai-roi-delivery-20260719-03`, canonical SlideDeck v5, render v13, quality v17.
+- Final quality result: 51/51 checks passed, including evidence logic, award-grade design contract, visual source quality, visual uniqueness, competition baseline, customer delivery readiness, and enterprise baseline.
+- PowerPoint 16.0 opened the final PPTX without repair, recognized all nine slides as a 16:9 presentation, and exported nine 1920x1080 slideshow PNGs.
+- Artifact inspection confirmed nine unique embedded media hashes, SimSun for East Asian text, Times New Roman for Latin text, matching titles across PPTX/HTML, no replacement characters, no terminal ellipses, fullscreen controls, keyboard navigation, and HyperFrames motion markers.
+- Final regression: 391 Python tests passed; TypeScript typecheck and Next.js production build passed; `git diff --check` passed.
+- Customer delivery package: `D:\Codex\Outputs\humanizeppt-enterprise-research-final-20260719-202200`.
+- Stable public entry: `https://shuhongguo56-crypto.github.io/ai-ppt-agent/live/`; the active free backend origin is maintained by `scripts/public-runtime.ps1` and recorded under `D:\Codex\Workspaces\ai-ppt-public-runtime`.
+
 ## 2026-07-19 expert-kernel upgrade
 
 - Research and enterprise rendering now use real raster-dimension gates: 2K ordinary pages and 4K cover/closing pages by default.
@@ -14,7 +29,7 @@
 - Verified kernel smoke: eight-slide expert render, all quality checks passed, PowerPoint 16.0 opened the file without repair and exported all slides to PNG.
 - The detailed implementation/acceptance backlog is in `docs/EXPERT_MODE_IMPROVEMENT_CHECKLIST.md`.
 
-Last updated: 2026-07-14
+Last updated: 2026-07-19
 
 ## What we are building
 

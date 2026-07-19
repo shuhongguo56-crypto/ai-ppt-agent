@@ -55,7 +55,9 @@ function Start-LocalApi {
   $env:AI_PPT_IMAGE_SEARCH_ENABLED = "true"
   $env:AI_PPT_POLLINATIONS_IMAGE_ENABLED = "true"
   $env:AI_PPT_POLLINATIONS_IMAGE_MODEL = "flux"
-  $env:AI_PPT_IMAGE_RESOLUTION_WORKERS = "2"
+  # Pollinations' free endpoint is materially more reliable when requests are
+  # serialized; research mode favors completion quality over one-minute speed.
+  $env:AI_PPT_IMAGE_RESOLUTION_WORKERS = "1"
   $env:AI_PPT_IMAGE_GENERATION_RETRY_ROUNDS = "3"
   $env:AI_PPT_EXPERT_IMAGE_MIN_LONG_EDGE = "1920"
   $env:AI_PPT_EXPERT_IMAGE_MIN_SHORT_EDGE = "1080"

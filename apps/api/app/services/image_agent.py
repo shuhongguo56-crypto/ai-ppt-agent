@@ -39,6 +39,7 @@ def build_image_plan(
         design_plan = deck_slide["designPlan"]
         slide_title = str(deck_slide.get("title") or outline_slide.title)
         image_type = _image_type(
+            topic=outline.slides[0].title,
             deck_type=outline.deck_type,
             purpose=str(outline_slide.purpose),
             title=slide_title,
@@ -86,6 +87,7 @@ def build_image_plan(
 
 def _image_type(
     *,
+    topic: str,
     deck_type: str,
     purpose: str,
     title: str,
@@ -93,7 +95,7 @@ def _image_type(
     asset_role: str,
     archetype: str,
 ) -> str:
-    content = f"{title} {key_point}".casefold()
+    content = f"{topic} {title} {key_point}".casefold()
     if any(marker in content for marker in ("古风", "诗词", "国风", "传统文化", "history", "heritage", "classical")):
         return "classical_element"
     if any(
@@ -120,6 +122,14 @@ def _image_type(
         if purpose in {"evidence", "insight"} or archetype in {"data_landscape", "proof_mosaic"}:
             return "data_visual"
         return "product_showcase" if purpose in {"cover", "recommendation", "conclusion"} else "business_scene"
+    if _is_enterprise_ai_content(content):
+        if purpose in {"agenda", "framework"} or archetype in {"chapter_index", "system_map", "process_ribbon"}:
+            return "icon_illustration"
+        if purpose == "evidence" or archetype in {"data_landscape", "proof_mosaic"}:
+            return "data_visual"
+        if purpose in {"insight", "conclusion"}:
+            return "thesis_concept"
+        return "business_scene"
     if deck_type == "business_pitch":
         if purpose in {"agenda", "framework"} or archetype in {"chapter_index", "system_map"}:
             return "icon_illustration"
@@ -199,6 +209,27 @@ def _search_query(
     image_type: str,
 ) -> str:
     raw = _clean(f"{topic} {title} {key_point}")
+    if _is_enterprise_ai_content(raw.casefold()):
+        page_intent = {
+            "cover": "executive team planning intelligent automation transformation in a modern enterprise office",
+            "agenda": "strategy workshop roadmap with physical cards and four decision gates",
+            "context": "business pilot review meeting comparing experiment results and operational readiness",
+            "framework": "human and AI workflow orchestration with connected process stages",
+            "evidence": "measurement baseline attribution and risk evidence represented by analytical objects",
+            "insight": "human AI collaboration operating model with clear ownership and oversight",
+            "recommendation": "cross functional enterprise team executing a phased 90 day implementation plan",
+            "conclusion": "responsible enterprise automation system with human control and resilient operations",
+        }.get(purpose, "enterprise AI agent adoption and operating value")
+        type_suffix = {
+            "icon_illustration": "editorial concept illustration no text",
+            "data_visual": "abstract data evidence still life no labels no dashboard",
+            "thesis_concept": "premium conceptual business photograph no screens no text",
+            "business_scene": "authentic corporate documentary photograph no visible text",
+        }.get(image_type, "premium corporate photograph no visible text")
+        return _clip(
+            f"enterprise AI agents {page_intent} {type_suffix}",
+            220,
+        )
     subject = _primary_subject(raw)
     slide_focus = _clean(
         " ".join(
@@ -216,6 +247,23 @@ def _search_query(
     if image_type in {"business_scene", "product_showcase"}:
         intent = "store product business scene photo, real-world brand context, no text"
     return _clip(_clean(f"{compact} {intent}"), 220)
+
+
+def _is_enterprise_ai_content(value: str) -> bool:
+    normalized = str(value).casefold()
+    ai = bool(
+        re.search(r"(?:^|\W)ai(?:$|\W)", normalized, re.IGNORECASE)
+        or any(term in normalized for term in ("artificial intelligence", "ai agent", "agentic", "人工智能", "智能体"))
+    )
+    enterprise = any(
+        term in normalized
+        for term in ("enterprise", "business", "organization", "企业", "业务", "组织")
+    )
+    adoption = any(
+        term in normalized
+        for term in ("adoption", "pilot", "scale", "roi", "deployment", "采用", "试点", "规模化", "投资回报")
+    )
+    return ai and enterprise and adoption
 
 
 def _primary_subject(value: str) -> str:

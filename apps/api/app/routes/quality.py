@@ -69,7 +69,18 @@ def _recommended_actions_for_failed_checks(failed_names: list[str]) -> list[str]
         actions.append("refresh_images")
     if any(marker in joined for marker in ("text_", "copy", "foreground_bounds", "font_family")):
         actions.append("rerender_with_safe_layout")
-    if any(marker in joined for marker in ("story", "outline", "page_delivery", "competition")):
+    if any(
+        marker in joined
+        for marker in (
+            "story",
+            "outline",
+            "page_delivery",
+            "competition",
+            "topic_grounding",
+            "evidence_logic",
+            "actionability",
+        )
+    ):
         actions.append("review_outline")
     if any(marker in joined for marker in ("hyperframes", "html_", "motion")):
         actions.append("rerender_hyperframes")

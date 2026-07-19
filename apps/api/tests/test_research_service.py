@@ -307,3 +307,136 @@ def test_chinese_research_uses_source_facts_instead_of_english_retrieval_filler(
     assert "2025 年研究《生成式人工智能在高等教育中的应用与效果》" in scholarly_summary
     assert "发表于《高等教育研究》" in scholarly_summary
     assert "Publication year" not in scholarly_summary
+
+
+def test_enterprise_ai_research_preserves_qualifiers_and_rejects_generic_ai(
+    monkeypatch,
+) -> None:
+    captured_queries: list[tuple[str, str]] = []
+
+    def fake_get_json(*, url: str, params: dict, timeout_seconds: float, user_agent: str):
+        captured_queries.append((url, str(params.get("search") or params.get("gsrsearch") or "")))
+        if "wikipedia.org" in url:
+            return {
+                "query": {
+                    "pages": [
+                        {
+                            "pageid": 1,
+                            "title": "Artificial intelligence",
+                            "fullurl": "https://en.wikipedia.org/wiki/Artificial_intelligence",
+                            "extract": "Artificial intelligence is a field of computer science. High-profile applications include web search and chatbots.",
+                        }
+                    ]
+                }
+            }
+        if "openalex.org" in url:
+            return {
+                "results": [
+                    {
+                        "id": "https://openalex.org/W-generic-ai",
+                        "display_name": "Artificial intelligence applications",
+                        "publication_year": 2026,
+                        "doi": "https://doi.org/10.1000/generic-ai",
+                        "cited_by_count": 1,
+                        "primary_location": {"landing_page_url": "https://doi.org/10.1000/generic-ai"},
+                        "abstract_inverted_index": {},
+                    },
+                    {
+                        "id": "https://openalex.org/W-enterprise-agents",
+                        "display_name": "Measuring enterprise AI agent adoption from pilot to ROI",
+                        "publication_year": 2026,
+                        "doi": "https://doi.org/10.1000/enterprise-agents",
+                        "cited_by_count": 4,
+                        "primary_location": {"landing_page_url": "https://doi.org/10.1000/enterprise-agents"},
+                        "abstract_inverted_index": {
+                            "Enterprise": [0],
+                            "AI": [1],
+                            "agents": [2],
+                            "require": [3],
+                            "workflow": [4],
+                            "baselines": [5],
+                            "and": [6],
+                            "attribution": [7],
+                            "before": [8],
+                            "scaling": [9],
+                        },
+                    },
+                    {
+                        "id": "https://openalex.org/W-energy-ai",
+                        "display_name": "Addressing challenges for effective adoption of artificial intelligence in the energy sector",
+                        "publication_year": 2026,
+                        "doi": "https://doi.org/10.1000/energy-ai",
+                        "cited_by_count": 2,
+                        "primary_location": {"landing_page_url": "https://doi.org/10.1000/energy-ai"},
+                        "abstract_inverted_index": {
+                            "Artificial": [0],
+                            "intelligence": [1],
+                            "adoption": [2],
+                            "can": [3],
+                            "transform": [4],
+                            "the": [5],
+                            "energy": [6],
+                            "sector": [7],
+                        },
+                    },
+                ]
+            }
+        if "crossref.org" in url:
+            return {"message": {"items": []}}
+        raise AssertionError(url)
+
+    monkeypatch.setattr(research, "_get_json", fake_get_json)
+    topic = "Enterprise AI Agent Adoption 2026: From Pilot to Measurable ROI"
+    result = research.research_topic_sources(
+        project_id="enterprise-ai-research",
+        topic=topic,
+        audience="Executive leadership and business owners",
+        language="en",
+        enabled=True,
+        max_sources=5,
+    )
+
+    assert any(topic.replace("AI", "artificial intelligence") in query for _, query in captured_queries)
+    combined = "\n".join(source.summary for source in result.source_pack.sources)
+    assert "Measuring enterprise AI agent adoption from pilot to ROI" in combined
+    assert "energy sector" not in combined
+    assert "High-profile applications include web search" not in combined
+    assert "Evidence matrix:" not in combined  # canonical summaries use the bilingual section label
+    assert "证据矩阵：" in result.source_pack.sources[0].summary
+    assert "value, adoption, governance, and reliable operations" in result.source_pack.sources[0].summary
+
+
+def test_enterprise_ai_authoritative_floor_is_decision_ready_when_live_apis_fail(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        research,
+        "_get_json",
+        lambda **_: (_ for _ in ()).throw(OSError("network unavailable")),
+    )
+
+    result = research.research_topic_sources(
+        project_id="enterprise-ai-fallback",
+        topic="Enterprise AI Agent Adoption: From Pilot to ROI",
+        audience="Executive leadership",
+        language="en",
+        enabled=True,
+    )
+
+    summary = result.source_pack.sources[0].summary
+    combined = "\n".join(source.summary for source in result.source_pack.sources)
+    assert result.mode == "web"
+    assert "authoritative-research-library" in result.providers
+    assert "20.2% of firms" in combined
+    assert "78% of survey respondents" in combined
+    assert "Nearly two-thirds of respondents" in combined
+    assert "NIST AI 600-1" in combined
+    assert "…" not in combined
+    for expected in [
+        "Value chain: connect model use to task adoption",
+        "human takeover",
+        "fully loaded cost",
+        "continue, redesign, or stop",
+    ]:
+        assert expected in summary
+    assert "what does Enterprise AI" not in summary

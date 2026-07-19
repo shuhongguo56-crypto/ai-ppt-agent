@@ -32,6 +32,43 @@ def test_quality_flags_outline_scaffold_in_customer_visible_copy() -> None:
     assert "core message" in issues
 
 
+def test_quality_detects_semantically_dangling_repair_fragments() -> None:
+    assert quality_service._visible_copy_looks_truncated(
+        "Source-backed context defines adoption and evaluation conditions; no client"
+    )
+    assert quality_service._visible_copy_looks_truncated(
+        "Evidence is available, but enterprise baseline, adoption, outcome"
+    )
+    assert quality_service._visible_copy_looks_truncated("select a frequent")
+    assert not quality_service._visible_copy_looks_truncated(
+        "External sources validate context; internal data must prove adoption"
+    )
+
+
+def test_competition_copy_density_rejects_semantically_incomplete_blocks() -> None:
+    from types import SimpleNamespace
+
+    deck = SimpleNamespace(
+        slides=[
+            SimpleNamespace(
+                slide_index=6,
+                title="Evidence matrix",
+                blocks=[
+                    SimpleNamespace(
+                        block_type="card",
+                        content="Source-backed context defines evaluation conditions; no client",
+                    )
+                ],
+            )
+        ]
+    )
+
+    check = quality_service._competition_copy_density_check(deck)
+
+    assert check["status"] == "failed"
+    assert "copy is visibly truncated" in check["detail"]
+
+
 def render_project(client) -> dict:
     assert client.post("/api/projects", json=PROJECT).status_code == 201
     outline = client.post("/api/projects/project-quality/outline/generate", json={})
@@ -122,6 +159,9 @@ def test_quality_check_passes_for_rendered_artifacts(client) -> None:
         "competition_visual_variety",
         "competition_image_intent",
         "research_storyline_contract",
+        "research_topic_grounding",
+        "research_evidence_logic_contract",
+        "research_actionability_contract",
         "research_page_delivery_contract",
         "research_visual_delivery_contract",
         "customer_delivery_readiness",

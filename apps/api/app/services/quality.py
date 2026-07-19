@@ -58,6 +58,9 @@ ENTERPRISE_PPT_BASELINE_CHECKS = {
     "competition_image_intent",
     "award_grade_design_contract",
     "research_storyline_contract",
+    "research_topic_grounding",
+    "research_evidence_logic_contract",
+    "research_actionability_contract",
     "research_page_delivery_contract",
     "research_visual_delivery_contract",
     "competition_ppt_baseline",
@@ -596,6 +599,9 @@ def _customer_delivery_readiness_check(checks: list[dict[str, str]]) -> dict[str
         "competition_ppt_baseline",
         "award_grade_design_contract",
         "research_storyline_contract",
+        "research_topic_grounding",
+        "research_evidence_logic_contract",
+        "research_actionability_contract",
         "research_page_delivery_contract",
         "research_visual_delivery_contract",
     }
@@ -632,6 +638,9 @@ def _competition_grade_checks(slide_deck: SlideDeck | None) -> list[dict[str, st
         _competition_image_intent_check(slide_deck),
         _award_grade_design_contract_check(slide_deck),
         _research_storyline_contract_check(slide_deck),
+        _research_topic_grounding_check(slide_deck),
+        _research_evidence_logic_contract_check(slide_deck),
+        _research_actionability_contract_check(slide_deck),
         _research_page_delivery_contract_check(slide_deck),
         _research_visual_delivery_contract_check(slide_deck),
     ]
@@ -688,6 +697,279 @@ def _research_storyline_contract_check(slide_deck: SlideDeck) -> dict[str, str]:
                 f"missing={','.join(missing) or 'none'}, frameworkCapability={framework_capability}."
             )
         ),
+    }
+
+
+def _research_topic_grounding_check(slide_deck: SlideDeck) -> dict[str, str]:
+    topic_terms = _research_topic_terms(slide_deck.title)
+    generic_traces = (
+        "artificial intelligence is the capability",
+        "it is a field of research",
+        "high-profile applications of ai",
+        "public sources explain",
+        "translate the conclusion into steps",
+        "从概念、机制、证据、应用与限制",
+        "把结论转译成",
+        "可复述的结论",
+    )
+    issues: list[str] = []
+    grounded_pages = 0
+    covered_terms: set[str] = set()
+    for slide in slide_deck.slides[1:]:
+        text = _slide_research_text(slide).casefold()
+        matched = {term for term in topic_terms if term in text}
+        covered_terms.update(matched)
+        if matched:
+            grounded_pages += 1
+        trace = next((marker for marker in generic_traces if marker in text), "")
+        if trace:
+            issues.append(
+                f"slide {slide.slide_index} contains generic research filler: {trace}"
+            )
+    if len(topic_terms) >= 3:
+        required_pages = max(3, (len(slide_deck.slides) - 1 + 1) // 2)
+        required_terms = min(3, len(topic_terms))
+        if grounded_pages < required_pages:
+            issues.append(
+                f"topic anchors appear on only {grounded_pages}/{len(slide_deck.slides) - 1} content pages; required {required_pages}"
+            )
+        if len(covered_terms) < required_terms:
+            issues.append(
+                f"deck covers only {len(covered_terms)}/{required_terms} required topic dimensions"
+            )
+    elif topic_terms:
+        deck_text = " ".join(_slide_research_text(slide) for slide in slide_deck.slides[1:]).casefold()
+        if not any(term in deck_text for term in topic_terms):
+            issues.append("the topic appears only on the cover and is not developed in the deck")
+    return {
+        "schemaVersion": "1.0.0",
+        "name": "research_topic_grounding",
+        "status": "passed" if not issues else "failed",
+        "detail": (
+            f"The deck develops {len(covered_terms) or len(topic_terms)} topic dimensions across {grounded_pages} content pages without generic retrieval filler."
+            if not issues
+            else f"Research topic grounding issues: {', '.join(issues[:8])}."
+        ),
+    }
+
+
+def _research_evidence_logic_contract_check(slide_deck: SlideDeck) -> dict[str, str]:
+    issues: list[str] = []
+    evidence_slides = [slide for slide in slide_deck.slides if slide.purpose == "evidence"]
+    if not evidence_slides:
+        issues.append("no evidence page")
+    specificity_markers = (
+        "evidence",
+        "source",
+        "baseline",
+        "attribution",
+        "metric",
+        "data",
+        "study",
+        "citation",
+        "证据",
+        "来源",
+        "基线",
+        "归因",
+        "指标",
+        "数据",
+        "研究",
+        "引用",
+    )
+    for slide in evidence_slides:
+        visible = _slide_research_text(slide).casefold()
+        traceable = any(block.block_type == "chart_placeholder" for block in slide.blocks)
+        specific = bool(re.search(r"\b(?:19|20)\d{2}\b|\d+(?:\.\d+)?%", visible)) or any(
+            marker in visible for marker in specificity_markers
+        )
+        if not traceable:
+            issues.append(f"slide {slide.slide_index} has no source/citation binding")
+        if not specific:
+            issues.append(f"slide {slide.slide_index} states evidence without a specific evidence object")
+
+    signatures: list[tuple[int, set[str]]] = []
+    for slide in slide_deck.slides[1:]:
+        terms = _research_signature_terms(_slide_research_text(slide))
+        if len(terms) >= 5:
+            signatures.append((slide.slide_index, terms))
+    for left_index, (left_slide, left_terms) in enumerate(signatures):
+        for right_slide, right_terms in signatures[left_index + 1 :]:
+            overlap = len(left_terms & right_terms) / max(1, min(len(left_terms), len(right_terms)))
+            if overlap >= 0.82:
+                issues.append(
+                    f"slides {left_slide} and {right_slide} repeat the same claim/support set"
+                )
+                break
+        if len(issues) >= 8:
+            break
+    return {
+        "schemaVersion": "1.0.0",
+        "name": "research_evidence_logic_contract",
+        "status": "passed" if not issues else "failed",
+        "detail": (
+            "Evidence pages bind claims to citation objects, and successive pages add distinct support rather than renaming one repeated point."
+            if not issues
+            else f"Research evidence/logic issues: {', '.join(issues[:8])}."
+        ),
+    }
+
+
+def _research_actionability_contract_check(slide_deck: SlideDeck) -> dict[str, str]:
+    issues: list[str] = []
+    action_markers = (
+        "start",
+        "define",
+        "measure",
+        "track",
+        "compare",
+        "validate",
+        "pilot",
+        "assign",
+        "freeze",
+        "scale",
+        "stop",
+        "days",
+        "week",
+        "threshold",
+        "gate",
+        "先",
+        "再",
+        "建立",
+        "定义",
+        "测量",
+        "跟踪",
+        "验证",
+        "试点",
+        "规模化",
+        "停止",
+        "天",
+        "周",
+        "门槛",
+        "指标",
+    )
+    recommendation_slides = [
+        slide for slide in slide_deck.slides if slide.purpose == "recommendation"
+    ]
+    if not recommendation_slides:
+        issues.append("no recommendation page")
+    for slide in recommendation_slides:
+        text = _slide_research_text(slide).casefold()
+        marker_count = sum(marker in text for marker in action_markers)
+        has_sequence_or_gate = bool(
+            re.search(r"(?:\b\d{1,3}\s*(?:day|days|week|weeks)\b|第\s*\d+|\d+\s*天|\d+\s*周|→|—)", text)
+        )
+        if marker_count < 2 and not has_sequence_or_gate:
+            issues.append(
+                f"slide {slide.slide_index} lacks an executable sequence, metric, owner, or decision gate"
+            )
+    conclusion = next(
+        (slide for slide in reversed(slide_deck.slides) if slide.purpose == "conclusion"),
+        None,
+    )
+    if conclusion is not None:
+        conclusion_text = _slide_research_text(conclusion).casefold()
+        if not any(
+            marker in conclusion_text
+            for marker in ("decision", "gate", "scale", "next", "决策", "门槛", "下一步", "规模化", "行动")
+        ):
+            issues.append("conclusion does not resolve into a decision or next gate")
+    return {
+        "schemaVersion": "1.0.0",
+        "name": "research_actionability_contract",
+        "status": "passed" if not issues else "failed",
+        "detail": (
+            "Recommendations specify executable actions or gates, and the conclusion resolves the research into a decision."
+            if not issues
+            else f"Research actionability issues: {', '.join(issues[:8])}."
+        ),
+    }
+
+
+def _slide_research_text(slide) -> str:
+    return " ".join(
+        [
+            slide.title,
+            slide.subtitle or "",
+            *[
+                block.content
+                for block in slide.blocks
+                if block.block_type not in {"image_placeholder", "speaker_notes"}
+            ],
+        ]
+    )
+
+
+def _research_topic_terms(value: str) -> set[str]:
+    normalized = value.casefold()
+    normalized = re.sub(r"\b(?:19|20)\d{2}\b", " ", normalized)
+    stopwords = {
+        "about",
+        "analysis",
+        "and",
+        "from",
+        "into",
+        "measurable",
+        "improve",
+        "improves",
+        "improving",
+        "enable",
+        "enables",
+        "support",
+        "supports",
+        "help",
+        "helps",
+        "presentation",
+        "report",
+        "research",
+        "strategy",
+        "the",
+        "with",
+        "人工智能",
+        "研究",
+        "分析",
+        "报告",
+        "策略",
+    }
+    terms: set[str] = set()
+    for token in re.findall(r"[a-z][a-z0-9-]{1,24}|[\u3400-\u9fff]{2,8}", normalized):
+        if token in stopwords:
+            continue
+        if re.fullmatch(r"[a-z][a-z0-9-]{3,24}s", token) and not token.endswith("ss"):
+            token = token[:-1]
+        terms.add(token)
+    if "artificial intelligence" in normalized:
+        terms.add("ai")
+        terms.discard("artificial")
+        terms.discard("intelligence")
+    return terms
+
+
+def _research_signature_terms(value: str) -> set[str]:
+    stopwords = {
+        "about",
+        "action",
+        "audience",
+        "conclusion",
+        "decision",
+        "evidence",
+        "explain",
+        "from",
+        "into",
+        "point",
+        "slide",
+        "the",
+        "this",
+        "with",
+        "行动",
+        "结论",
+        "证据",
+        "本页",
+        "说明",
+    }
+    return {
+        token
+        for token in re.findall(r"[a-z][a-z0-9-]{2,24}|[\u3400-\u9fff]{2,8}", value.casefold())
+        if token not in stopwords
     }
 
 
@@ -804,6 +1086,12 @@ def _competition_copy_density_check(slide_deck: SlideDeck) -> dict[str, str]:
         title_limit = 34 if re.search(r"[\u3400-\u9fff]", slide.title) else 62
         if _visible_copy_looks_truncated(slide.title):
             issues.append(f"slide {slide.slide_index} title is visibly truncated")
+        for block in visible_blocks:
+            if _visible_copy_looks_truncated(block.content):
+                issues.append(
+                    f"slide {slide.slide_index} {block.block_type} copy is visibly truncated"
+                )
+                break
         if len(slide.title) > title_limit:
             issues.append(f"slide {slide.slide_index} title too long")
         if card_count > 6:
@@ -1545,12 +1833,12 @@ def _estimated_required_text_height(
     usable_cx = max(300000, cx - inset_x * 2)
     point_size = max(8.0, font_size / 100.0)
     avg_weight_emu = point_size * EMU_PER_POINT * 0.56
-    capacity = max(10, int((usable_cx * 2) / max(avg_weight_emu, 1.0)))
+    capacity = max(10, int(usable_cx / max(avg_weight_emu, 1.0)))
     weight = sum(2 if "\u3400" <= character <= "\u9fff" else 1 for character in text)
     lines = max(1, (weight + capacity - 1) // capacity)
     # Match the renderer's conservative SimSun metrics so a QA pass reflects
     # what PowerPoint/WPS actually shows instead of underestimating CJK height.
-    line_height = int(point_size * EMU_PER_POINT * (1.34 if role == "title" else 1.38))
+    line_height = int(point_size * EMU_PER_POINT * (1.34 if role == "title" else 1.62))
     return lines * line_height + inset_y * 2
 
 
@@ -1607,6 +1895,25 @@ def _visible_copy_looks_truncated(value: str) -> bool:
     if not visible:
         return False
     if re.search(r"(?:…|\.{3})", visible):
+        return True
+    if re.search(r"\b(?:no|without|because|although|while)\s+[a-z][a-z-]{1,24}$", visible, re.IGNORECASE):
+        # A repair pass can cut a longer evidence clause at a word boundary and
+        # leave copy that is lexically valid but semantically unfinished, e.g.
+        # "conditions; no client". Treat it exactly like visible truncation.
+        return True
+    if re.search(
+        r"\b(?:a|an|the)\s+(?:frequent|measurable|reversible|controlled|credible|clear|strong|specific|reliable)$",
+        visible,
+        re.IGNORECASE,
+    ):
+        return True
+    if re.search(
+        r"\bbut\b[^.;:!?]{0,90}(?:,\s*[^,.;:!?]+){1,}$",
+        visible,
+        re.IGNORECASE,
+    ):
+        # A terminal adversative noun list ("but baseline, adoption, outcome")
+        # has lost the predicate or decision clause that follows it.
         return True
     last_word_match = re.search(r"\b([a-z]{1,3})$", visible)
     if not last_word_match:

@@ -18,7 +18,7 @@ class QualityReport(ContractModel):
     project_id: NonBlankString
     render_version: int = Field(ge=1)
     passed: bool
-    checks: list[QualityCheckItem] = Field(min_length=1, max_length=48)
+    checks: list[QualityCheckItem] = Field(min_length=1, max_length=64)
 
     @model_validator(mode="after")
     def align_passed_with_checks(self) -> "QualityReport":

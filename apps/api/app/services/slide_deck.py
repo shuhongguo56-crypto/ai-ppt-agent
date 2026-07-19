@@ -337,7 +337,9 @@ def repair_slide_deck_for_quality(
                             continue
                     source_content = _outline_source_for_block(block, outline_slide)
                     block["content"] = _repair_visible_copy(
-                        source_content, card_limit if block_type == "card" else body_limit
+                        source_content,
+                        card_limit if block_type == "card" else body_limit,
+                        preserve_complete=True,
                     )
                     fingerprint = _title_fingerprint(block["content"])
                     if fingerprint and fingerprint in seen_visible:
@@ -601,13 +603,24 @@ def _repair_image_prompt(page_subject: str, original_prompt: str) -> str:
     return f"{semantic_body} | {_AWARD_IMAGE_PROMPT_CONTRACT}"
 
 
-def _repair_visible_copy(value: str, limit: int) -> str:
+def _repair_visible_copy(
+    value: str,
+    limit: int,
+    *,
+    preserve_complete: bool = False,
+) -> str:
     cleaned = _strip_outline_scaffold_label(str(value))
     cleaned = cleaned.replace("\ufffd", "")
     cleaned = re.sub(r"\?{4,}", "", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     if not cleaned:
         cleaned = re.sub(r"\s+", " ", str(value)).strip()
+    if preserve_complete and len(cleaned) <= 260:
+        # The canonical SlideDeck should keep the complete outline claim. PPTX
+        # and HyperFrames share a renderer-side clause compactor, so cutting a
+        # card here only destroys meaning (for example, dropping the clause
+        # after "but" or a semicolon) without improving the actual layout.
+        return cleaned.strip(" \t\r\n，。；：、,:;-—–. …")
     return _clip_title_without_ellipsis(cleaned, limit)
 
 
@@ -618,13 +631,16 @@ def _clip_title_without_ellipsis(value: str, limit: int) -> str:
     if len(text) <= limit:
         return _trim_dangling_title_word(text)
     window = text[:limit].rstrip()
-    boundary = -1
-    for marker in ("。", "；", "，", "、", ";", ",", "—", "-", " "):
-        candidate = window.rfind(marker)
-        if candidate >= int(limit * 0.58):
-            boundary = max(boundary, candidate)
-    if boundary > 0:
-        window = window[:boundary]
+    punctuation_boundary = max(
+        (window.rfind(marker) for marker in ("。", "；", "，", "、", "：", "—", "–", ";", ",", ":", "-")),
+        default=-1,
+    )
+    if punctuation_boundary >= int(limit * 0.42):
+        window = window[:punctuation_boundary]
+    else:
+        space = window.rfind(" ")
+        if space >= int(limit * 0.45):
+            window = window[:space]
     return _trim_dangling_title_word(window.strip(" \t\r\n，。；：、,:;-—–. …"))
 
 
@@ -635,8 +651,8 @@ def _trim_dangling_title_word(value: str) -> str:
             text = text[:-1].rstrip()
         return text
     dangling = {
-        "a", "an", "and", "as", "at", "by", "for", "from", "in", "into",
-        "of", "on", "or", "the", "to", "with",
+        "a", "an", "and", "as", "at", "but", "by", "for", "from", "if", "in", "into",
+        "of", "on", "or", "than", "that", "the", "to", "when", "while", "which", "with",
     }
     words = text.split()
     while len(words) > 3 and words[-1].casefold().strip(".,:;—-") in dangling:
@@ -1227,6 +1243,48 @@ def _compact_diagram_label(value: str) -> str:
     ).strip()
     has_cjk = bool(re.search(r"[\u3400-\u9fff]", cleaned))
     limit = 32 if has_cjk else 64
+    if len(cleaned) > limit:
+        colon_match = re.match(r"^([^:：]{4,44})[:：]\s*(.+)$", cleaned)
+        if colon_match:
+            head, tail = colon_match.groups()
+            generic_heads = {
+                "evidence boundary",
+                "core message",
+                "main takeaway",
+                "source claim",
+                "traceable evidence",
+            }
+            if head.casefold().strip() not in generic_heads and len(head) >= 24:
+                cleaned = head.strip()
+            else:
+                if 8 <= len(tail) <= limit:
+                    cleaned = tail.strip()
+                    tail_parts = []
+                else:
+                    tail_parts = [
+                        part.strip()
+                        for part in re.split(r"[。；;.!?！？，,]", tail)
+                        if part.strip()
+                    ]
+                complete_tail = next(
+                    (part for part in tail_parts if 24 <= len(part) <= limit),
+                    "",
+                )
+                if complete_tail:
+                    cleaned = re.sub(r"^(?:and|or|but)\s+", "", complete_tail, flags=re.IGNORECASE)
+                elif tail_parts and 8 <= len(tail_parts[-1]) <= limit:
+                    cleaned = re.sub(r"^(?:and|or|but)\s+", "", tail_parts[-1], flags=re.IGNORECASE)
+    if len(cleaned) > limit:
+        # Diagram labels must be complete thought units. Preserve an exact
+        # prefix through the last clause boundary instead of cutting on a
+        # whitespace boundary and leaving a trailing verb such as "run".
+        bounded = cleaned[:limit]
+        clause_boundary = max(
+            (bounded.rfind(marker) for marker in ("。", "；", ";", ".", "!", "?", "！", "？", "，", ",", "：", ":", "—", "–")),
+            default=-1,
+        )
+        if clause_boundary >= int(limit * 0.42):
+            cleaned = cleaned[:clause_boundary].rstrip()
     return _clip_title_without_ellipsis(cleaned, limit)
 
 

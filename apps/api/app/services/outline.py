@@ -229,6 +229,7 @@ _SLIDE_BLUEPRINTS = {
         ("cover", "hero"),
         ("agenda", "section"),
         ("context", "two_column"),
+        ("framework", "three_cards"),
         ("insight", "three_cards"),
         ("evidence", "chart_focus"),
         ("recommendation", "timeline"),
@@ -254,6 +255,7 @@ class _SourceProfile:
     thesis: str
     key_points: list[str]
     evidence: list[str]
+    evidence_matrix: list[str]
     ppt_flow: list[str]
     excerpts: list[str]
     source_ids: list[str]
@@ -387,6 +389,7 @@ def _deterministic_outline_decision(
     source_hint = _source_hint(source_pack)
     source_profile = _source_profile(source_pack)
     slides: list[dict[str, Any]] = []
+    seen_key_points: set[str] = set()
     for index, (purpose, layout) in enumerate(blueprints, start=1):
         slide = _slide_payload(brief, index, purpose, layout, source_hint=source_hint)
         if source_profile is not None:
@@ -398,6 +401,25 @@ def _deterministic_outline_decision(
                 layout=layout,
                 source_profile=source_profile,
             )
+        key_point = str(slide["keyPoint"]).strip()
+        normalized_key_point = re.sub(r"\W+", "", key_point).casefold()
+        if normalized_key_point in seen_key_points:
+            first_support = str(slide.get("talkingPoints", [""])[0]).strip()
+            separator = "：" if _is_zh(brief) else ": "
+            key_point = _clip_text(
+                f"{slide['title']}{separator}{first_support or key_point}",
+                132 if _is_zh(brief) else 220,
+            )
+            normalized_key_point = re.sub(r"\W+", "", key_point).casefold()
+        if normalized_key_point in seen_key_points:
+            suffix = f"（{index}）" if _is_zh(brief) else f" — {index}"
+            key_point = _clip_text(
+                f"{key_point}{suffix}",
+                132 if _is_zh(brief) else 220,
+            )
+            normalized_key_point = re.sub(r"\W+", "", key_point).casefold()
+        seen_key_points.add(normalized_key_point)
+        slide["keyPoint"] = key_point
         slides.append(slide)
 
     payload: dict[str, Any] = {
@@ -454,6 +476,15 @@ def _outline_from_model_payload(
             item["suggestedLayout"] = "closing"
         purpose = str(item["purpose"])
         if source_profile is not None:
+            if _is_enterprise_ai_adoption_source(brief, source_profile):
+                item = _source_grounded_slide_payload(
+                    brief=brief,
+                    base=item,
+                    index=index,
+                    purpose=purpose,
+                    layout=str(item["suggestedLayout"]),
+                    source_profile=source_profile,
+                )
             if _generic_outline_copy(str(item.get("title", "")), purpose=purpose):
                 item["title"] = _source_slide_title(
                     brief, purpose, source_profile, index
@@ -564,6 +595,14 @@ def _outline_from_local_model_payload(
                 source_profile=source_profile,
             )
         raw = raw_slides[index - 1] if index - 1 < len(raw_slides) else {}
+        if source_profile is not None and _is_enterprise_ai_adoption_source(
+            brief, source_profile
+        ):
+            # Enterprise AI adoption decks use the evidence-grounded decision
+            # contract as the minimum bar.  A small local model may enrich other
+            # topics, but it must not overwrite this contract with generic AI
+            # definitions or repeated "turn the conclusion into action" copy.
+            raw = {}
         if isinstance(raw, dict):
             title = str(raw.get("title") or base["title"]).strip()
             key_point = str(raw.get("keyPoint") or base["keyPoint"]).strip()
@@ -797,15 +836,62 @@ def _slide_payload(
         citation_label = f"citation-{index}"
     else:
         title = f"{base_title}: {topic}" if purpose in {"cover", "conclusion"} else base_title
-        key_point = (
-            f"{purpose}-{index}: use the provided material to explain {topic} for {brief.audience}"
-            if source_hint and purpose == "evidence"
-            else f"{purpose}-{index}: {topic} for {brief.audience}"
-        )
-        talking_points = [
-            f"Connect {topic} to the audience context.",
-            "Keep the message focused on one idea for this slide.",
-        ]
+        key_points_by_purpose = {
+            "cover": f"Central question: what does {topic} change for {brief.audience}?",
+            "agenda": f"Decision path: frame {topic}, explain the mechanism, test the evidence, and resolve the next gate.",
+            "context": f"Context: identify why {topic} matters now, who decides, and which outcome is at stake.",
+            "framework": f"Mechanism: connect the inputs, actors, constraints, and outcomes that shape {topic}.",
+            "evidence": f"Evidence boundary: bind each claim about {topic} to a source, measure, or explicit gap.",
+            "insight": f"Insight: separate the variable that changes the outcome from background facts about {topic}.",
+            "recommendation": f"Action: define one owner, one evidence threshold, and the next review gate for {topic}.",
+            "conclusion": f"Decision: carry {topic} forward only with a clear evidence standard and next gate.",
+        }
+        talking_points_by_purpose = {
+            "cover": [
+                f"Define the decision {brief.audience} needs to make.",
+                f"State the expected change connected to {topic}.",
+            ],
+            "agenda": [
+                "Start with context and the decision at stake.",
+                "Move through mechanism, evidence, and implication.",
+                "End with an owner, metric, and next gate.",
+            ],
+            "context": [
+                "Name the trigger that makes the topic timely.",
+                "Separate affected users, decision owners, and risk owners.",
+                "Define the outcome that the deck will explain.",
+            ],
+            "framework": [
+                "Map the inputs and actors before discussing outcomes.",
+                "Show the causal link instead of listing features.",
+                "Mark the constraint that can break the mechanism.",
+            ],
+            "evidence": [
+                "Attach each material claim to a citation or metric.",
+                "Separate observed facts from inference.",
+                "Label missing data before final delivery.",
+            ],
+            "insight": [
+                "Identify the variable with the greatest decision impact.",
+                "Explain why the evidence changes the initial view.",
+                "State the boundary where the conclusion no longer applies.",
+            ],
+            "recommendation": [
+                f"Start with one bounded use case for {topic}.",
+                "Measure the agreed outcome against a baseline.",
+                "Review the result and decide whether to continue, redesign, or stop.",
+            ],
+            "conclusion": [
+                "State the final judgment in one sentence.",
+                "Name the next decision gate and evidence owner.",
+            ],
+        }
+        key_point = key_points_by_purpose[purpose]
+        talking_points = talking_points_by_purpose[purpose]
+        if purpose == "recommendation":
+            key_point = key_points_by_purpose["recommendation"]
+        elif purpose == "conclusion":
+            key_point = key_points_by_purpose["conclusion"]
         if source_hint and purpose in {"context", "evidence", "insight"}:
             talking_points[0] = f"Anchor the slide in this source signal: {source_hint}"
         visual_intent = f"Use a premium {layout.replace('_', ' ')} composition with strong hierarchy."
@@ -895,6 +981,7 @@ def _source_profile(source_pack: SourcePack | None) -> _SourceProfile | None:
     key_points: list[str] = []
     scholarly_evidence: list[str] = []
     general_evidence: list[str] = []
+    evidence_matrix: list[str] = []
     ppt_flow: list[str] = []
     excerpts: list[str] = []
     logic_chain_values: dict[str, str] = {}
@@ -923,6 +1010,11 @@ def _source_profile(source_pack: SourcePack | None) -> _SourceProfile | None:
             if logic_value and logic_key not in logic_chain_values:
                 logic_chain_values[logic_key] = logic_value
         source_evidence = _section_items(summary, "重要事实/数据/证据")
+        source_matrix = [
+            *_section_items(summary, "证据矩阵"),
+            *_section_items(summary, "Evidence matrix"),
+        ]
+        evidence_matrix.extend(source_matrix)
         if case_sections.get("evidence"):
             source_evidence.append(case_sections["evidence"])
         source_evidence.extend(logic_chain["evidence"])
@@ -946,7 +1038,10 @@ def _source_profile(source_pack: SourcePack | None) -> _SourceProfile | None:
         ppt_flow.extend(logic_chain["flow"])
         excerpts.extend(_section_items(summary, "原文摘录"))
     key_points = _unique_source_items(key_points)
-    evidence = _unique_source_items([*scholarly_evidence, *general_evidence])
+    evidence_matrix = _unique_source_items(evidence_matrix)
+    evidence = _unique_source_items(
+        [*evidence_matrix, *scholarly_evidence, *general_evidence]
+    )
     ppt_flow = _unique_source_items(ppt_flow)
     excerpts = _unique_source_items(excerpts)
     if not key_points:
@@ -963,6 +1058,7 @@ def _source_profile(source_pack: SourcePack | None) -> _SourceProfile | None:
         thesis=_clip_text(thesis, 220),
         key_points=[_clip_text(item, 220) for item in key_points[:8]],
         evidence=[_clip_text(item, 220) for item in evidence[:6]],
+        evidence_matrix=[_clip_text(item, 300) for item in evidence_matrix[:6]],
         ppt_flow=[_clip_text(item, 220) for item in ppt_flow[:8]],
         excerpts=[_clip_text(item, 220) for item in excerpts[:5]],
         source_ids=source_ids[:6],
@@ -1685,6 +1781,259 @@ def _distinct_source_claims(source_profile: _SourceProfile) -> list[str]:
     return claims
 
 
+def _is_enterprise_ai_adoption_source(
+    brief: ProjectBrief, source_profile: _SourceProfile
+) -> bool:
+    haystack = " ".join(
+        [
+            brief.topic,
+            brief.audience,
+            source_profile.title,
+            source_profile.thesis,
+            *source_profile.key_points,
+        ]
+    ).casefold()
+    ai = bool(
+        re.search(r"(?:^|\W)ai(?:$|\W)", haystack, re.IGNORECASE)
+        or any(
+            term in haystack
+            for term in ("人工智能", "生成式人工智能", "智能体", "artificial intelligence", "agentic", " ai agent")
+        )
+    )
+    enterprise = any(
+        term in haystack
+        for term in ("企业", "组织", "业务", "enterprise", "business", "organization")
+    )
+    adoption = any(
+        term in haystack
+        for term in (
+            "采用",
+            "落地",
+            "试点",
+            "规模化",
+            "投资回报",
+            "adoption",
+            "pilot",
+            "scale",
+            "scaling",
+            "deployment",
+            "roi",
+        )
+    )
+    return ai and enterprise and adoption
+
+
+def _enterprise_ai_evidence_anchor(source_profile: _SourceProfile, language: str) -> str:
+    has_external_source = any(
+        source_id.startswith(("web-openalex-", "web-crossref-", "web-wikipedia-"))
+        for source_id in source_profile.source_ids
+    )
+    if language == "zh":
+        return (
+            "外部资料可支撑采用与评价方法；但仍需企业内部的基线、采用、业务结果与完整成本数据，才能证明 ROI 归因。"
+            if has_external_source
+            else "当前资料建立了评价方法，但尚缺企业内部的基线、采用、业务结果与完整成本数据，不能直接宣称 ROI。"
+        )
+    return (
+        "External research supports adoption and evaluation methods; enterprise baseline, adoption, outcome, and fully loaded cost data are still required for ROI attribution."
+        if has_external_source
+        else "The current source pack defines an evaluation method, but enterprise baseline, adoption, outcome, and fully loaded cost data are still missing; ROI cannot yet be claimed."
+    )
+
+
+def _enterprise_ai_source_title(
+    brief: ProjectBrief, purpose: str, index: int
+) -> str:
+    scale_phase = index > (7 if brief.deck_type == "business_pitch" else 6)
+    if _is_zh(brief):
+        mapping = {
+            "cover": _clean_topic_for_outline(brief.topic, 36),
+            "agenda": "从试点到规模化：四道决策门",
+            "context": "试点成功，不等于规模化成立",
+            "framework": "ROI 链：使用—流程—业务—财务",
+            "evidence": "证据矩阵：基线、归因与风险",
+            "insight": "真正瓶颈是运行模型，不是演示能力",
+            "recommendation": (
+                "规模化门槛：价值、采用、风险"
+                if scale_phase
+                else "90 天验证路径"
+            ),
+            "conclusion": "把 AI 智能体当作经营系统",
+        }
+    else:
+        mapping = {
+            "cover": _clean_topic_for_outline(brief.topic, 64),
+            "agenda": "Four gates from pilot to scale",
+            "context": "Pilot success is not scale evidence",
+            "framework": "ROI chain: use → process → outcome → value",
+            "evidence": "Evidence matrix: baseline, attribution, risk",
+            "insight": "The bottleneck is the operating model",
+            "recommendation": (
+                "Scale only after value, adoption, and risk gates"
+                if scale_phase
+                else "A 90-day proof path"
+            ),
+            "conclusion": "Run AI agents as an operating system",
+        }
+    return mapping[purpose]
+
+
+def _enterprise_ai_source_key_point(
+    brief: ProjectBrief,
+    purpose: str,
+    source_profile: _SourceProfile,
+    index: int,
+) -> str:
+    evidence = _enterprise_ai_evidence_anchor(source_profile, brief.output_language)
+    scale_phase = index > (7 if brief.deck_type == "business_pitch" else 6)
+    if _is_zh(brief):
+        mapping = {
+            "cover": "核心判断：智能体只有在持续采用、流程改善、风险可控和收益可归因同时成立时，才从试点进入规模化。",
+            "agenda": "管理层需要依次回答四个问题：价值是否真实、使用是否持续、运行是否可靠、风险是否可接受。",
+            "context": "一次演示只能证明可行性；规模化决策需要重复结果、真实采用、完整成本和可恢复的运行机制。",
+            "framework": "ROI 必须沿‘使用—流程—业务—财务’逐层归因，并把人工复核、集成、合规和运维计入成本。",
+            "evidence": f"证据边界：{evidence}",
+            "insight": "多数价值断点发生在流程所有权、数据权限、异常处理和测量口径，而不是模型是否会生成答案。",
+            "recommendation": (
+                "规模化只在三线同时达标后发生：业务收益可重复、采用行为可持续、风险与运行指标不越线。"
+                if scale_phase
+                else "用 90 天完成场景筛选、基线冻结、受控试点和双轨测量，最后做继续、调整或停止决策。"
+            ),
+            "conclusion": "把智能体作为有人负责、可测量、可审计、可回退的经营系统，ROI 才能从故事变成决策。",
+        }
+    else:
+        mapping = {
+            "cover": "Core decision: an agent earns the right to scale only when sustained adoption, workflow improvement, controlled risk, and attributable value all hold.",
+            "agenda": "Leadership must answer four questions in order: Is value real? Is use sustained? Are operations reliable? Is risk acceptable?",
+            "context": "A demo proves feasibility. A scale decision requires repeatable outcomes, real adoption, fully loaded cost, and recoverable operations.",
+            "framework": "Attribute ROI across use, process, business outcome, and financial value—and include human review, integration, compliance, and operations in cost.",
+            "evidence": f"Evidence boundary: {evidence}",
+            "insight": "The value break usually occurs in workflow ownership, data access, exception handling, and measurement—not in whether the model can produce an answer.",
+            "recommendation": (
+                "Scale only when three lines pass together: repeatable business value, sustained adoption, and risk plus reliability within threshold."
+                if scale_phase
+                else "Use 90 days to select the workflow, freeze the baseline, run a controlled pilot, measure value and risk in parallel, then continue, redesign, or stop."
+            ),
+            "conclusion": "Treat the agent as an owned, measurable, auditable, and recoverable operating system; that is how ROI becomes a decision instead of a story.",
+        }
+    return _clip_text(mapping[purpose], 132 if _is_zh(brief) else 220)
+
+
+def _enterprise_ai_source_talking_points(
+    brief: ProjectBrief,
+    purpose: str,
+    source_profile: _SourceProfile,
+    index: int,
+) -> list[str]:
+    evidence = _enterprise_ai_evidence_anchor(source_profile, brief.output_language)
+    scale_phase = index > (7 if brief.deck_type == "business_pitch" else 6)
+    if _is_zh(brief):
+        mapping = {
+            "cover": [
+                "决策对象：从试点走向可重复的业务价值。",
+                "判断标准：价值、采用、治理与运行同时达标。",
+            ],
+            "agenda": [
+                "价值门：结果是否优于基线且能够归因？",
+                "采用门：目标用户是否持续在真实任务中使用？",
+                "治理门：数据、权限、审计与人工接管是否清楚？",
+                "运行门：异常、版本变化和服务中断能否恢复？",
+            ],
+            "context": [
+                "能力指标回答‘能不能做’，经营指标回答‘值不值得扩’。",
+                "单次成功、调用量和节省工时都不能单独证明 ROI。",
+                "规模化前必须看到跨时间、跨用户或跨任务的可重复性。",
+            ],
+            "framework": [
+                "使用层：任务采用率、留存、人工接管率。",
+                "流程层：周期、吞吐、返工、错误与服务质量。",
+                "业务层：转化、收入、风险损失或客户结果。",
+                "财务层：收益减去模型、集成、人工、合规与运维成本。",
+            ],
+            "evidence": [
+                "资料中的事实用于界定采用与评价条件；本页不替客户内部数据宣称 ROI。",
+                "外部资料负责验证背景和方法，内部数据负责证明采用、流程变化与财务结果。",
+                "每项结论必须标记为事实、推断、风险边界或待补证缺口。",
+            ],
+            "insight": [
+                "没有业务负责人，智能体只能停留在技术演示。",
+                "没有基线与归因，效率提升无法进入投资决策。",
+                "没有异常处理和回退，规模越大，运行风险越高。",
+            ],
+            "recommendation": (
+                [
+                    "收益线：目标指标达到预设改善且可重复。",
+                    "采用线：目标用户留存、任务覆盖和人工接管符合门槛。",
+                    "风险线：错误、越权、隐私与中断不超过容忍度。",
+                    "任何一线未达标，先调整流程或停止扩张。",
+                ]
+                if scale_phase
+                else [
+                    "第 1—15 天：选高频、可测、可回退的工作流并冻结基线。",
+                    "第 16—60 天：受控上线，同时记录价值、采用、风险与完整成本。",
+                    "第 61—90 天：跨用户复测，形成继续、调整或停止的证据包。",
+                ]
+            ),
+            "conclusion": [
+                "规模化复制的是责任、数据、评估和运行机制，不只是提示词。",
+                "客户交付物应同时包含 ROI 仪表盘、风险台账和下一轮决策门。",
+            ],
+        }
+    else:
+        mapping = {
+            "cover": [
+                "Decision object: move from pilot activity to repeatable operating value.",
+                "Standard: value, adoption, governance, and reliability must pass together.",
+            ],
+            "agenda": [
+                "Value gate: does the result beat baseline with credible attribution?",
+                "Adoption gate: do target users keep using it in real work?",
+                "Governance gate: are data, access, audit, and human takeover explicit?",
+                "Reliability gate: can exceptions, model changes, and outages be recovered?",
+            ],
+            "context": [
+                "Capability metrics answer ‘can it work?’; operating metrics answer ‘should it scale?’",
+                "A single success, invocation count, or hours-saved estimate cannot prove ROI alone.",
+                "Scale requires repeatability across time, users, or task cohorts.",
+            ],
+            "framework": [
+                "Use: task adoption, retention, and human takeover.",
+                "Process: cycle time, throughput, rework, error, and service quality.",
+                "Outcome: conversion, revenue, risk loss, or customer result.",
+                "Value: outcome minus model, integration, human, compliance, and run cost.",
+            ],
+            "evidence": [
+                "Source-backed context defines adoption and evaluation conditions; no client-specific ROI claim is made.",
+                "External sources validate context and method; internal data must prove adoption, workflow change, and financial impact.",
+                "Tag every conclusion as fact, inference, risk boundary, or evidence gap.",
+            ],
+            "insight": [
+                "Without a business owner, the agent remains a technical demonstration.",
+                "Without baseline and attribution, efficiency cannot enter an investment decision.",
+                "Without exception handling and rollback, scale amplifies operating risk.",
+            ],
+            "recommendation": (
+                [
+                    "Value line: the target outcome improves to threshold and repeats.",
+                    "Adoption line: retention, task coverage, and takeover stay within gate.",
+                    "Risk line: errors, unauthorized action, privacy, and downtime stay within tolerance.",
+                    "If any line fails, redesign the workflow or stop expansion.",
+                ]
+                if scale_phase
+                else [
+                    "Days 1–15: select a frequent, measurable, reversible workflow and freeze baseline.",
+                    "Days 16–60: run a controlled pilot while capturing value, adoption, risk, and fully loaded cost.",
+                    "Days 61–90: repeat across users and issue a continue, redesign, or stop evidence pack.",
+                ]
+            ),
+            "conclusion": [
+                "Scale ownership, data, evaluation, and operations—not only the prompt.",
+                "The delivery package should pair an ROI scorecard with a risk register and the next decision gate.",
+            ],
+        }
+    return mapping[purpose]
+
+
 def _is_business_strategy_source(brief: ProjectBrief, source_profile: _SourceProfile) -> bool:
     haystack = " ".join(
         [
@@ -1711,6 +2060,11 @@ def _is_business_strategy_source(brief: ProjectBrief, source_profile: _SourcePro
         "growth",
         "brand",
         "customer",
+        "enterprise",
+        "adoption",
+        "pilot",
+        "roi",
+        "governance",
     )
     return sum(term in haystack for term in terms) >= 3
 
@@ -1863,6 +2217,11 @@ def _source_slide_title(
     point = _pick(source_profile.key_points, index - 3, source_profile.thesis)
     evidence = _pick(source_profile.evidence, index - 5, point)
     anchor = _source_argument_anchor(source_profile, purpose, index)
+    if _is_enterprise_ai_adoption_source(brief, source_profile):
+        return _clip_text(
+            _enterprise_ai_source_title(brief, purpose, index),
+            110,
+        )
     if _is_zh(brief):
         if _is_auto_research_profile(source_profile) and _is_ai_education_topic(
             f"{topic_label} {brief.audience} {source_profile.thesis}"
@@ -1931,6 +2290,13 @@ def _source_slide_key_point(
         if not _is_zh(brief) or re.search(r"[\u3400-\u9fff]", evidence)
         else point
     )
+    if _is_enterprise_ai_adoption_source(brief, source_profile):
+        return _enterprise_ai_source_key_point(
+            brief,
+            purpose,
+            source_profile,
+            index,
+        )
     if _is_zh(brief):
         if _is_auto_research_profile(source_profile) and _is_ai_education_topic(
             f"{source_profile.title} {brief.audience} {source_profile.thesis}"
@@ -1992,6 +2358,13 @@ def _source_talking_points(
     source_profile: _SourceProfile,
     index: int,
 ) -> list[str]:
+    if _is_enterprise_ai_adoption_source(brief, source_profile):
+        return _enterprise_ai_source_talking_points(
+            brief,
+            purpose,
+            source_profile,
+            index,
+        )
     if (
         _is_zh(brief)
         and _is_auto_research_profile(source_profile)

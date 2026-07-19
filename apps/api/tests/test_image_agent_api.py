@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from app.services.image_agent import _image_type, _search_query
+
 PROJECT = {
     "schemaVersion": "1.0.0",
     "projectId": "project-image-agent",
@@ -10,6 +12,55 @@ PROJECT = {
     "audience": "Undergraduates",
     "mode": "professional",
 }
+
+
+def test_enterprise_ai_image_routing_keeps_project_context_across_pages() -> None:
+    topic = "Enterprise AI Agent Adoption 2026: From Pilot to Measurable ROI"
+
+    cover_type = _image_type(
+        topic=topic,
+        deck_type="business_pitch",
+        purpose="cover",
+        title=topic,
+        key_point="Scale only when operating and financial value are both proven.",
+        asset_role="hero",
+        archetype="hero",
+    )
+    evidence_type = _image_type(
+        topic=topic,
+        deck_type="business_pitch",
+        purpose="evidence",
+        title="Evidence matrix",
+        key_point="Separate observed facts, boundaries, gaps, and decisions.",
+        asset_role="evidence",
+        archetype="proof_mosaic",
+    )
+    conclusion_type = _image_type(
+        topic=topic,
+        deck_type="business_pitch",
+        purpose="conclusion",
+        title="Scale gates",
+        key_point="Fund the next wave only after value, control, and adoption gates pass.",
+        asset_role="metaphor",
+        archetype="closing",
+    )
+
+    assert cover_type == "business_scene"
+    assert evidence_type == "data_visual"
+    assert conclusion_type == "thesis_concept"
+
+    evidence_query = _search_query(
+        topic=topic,
+        title="Evidence matrix",
+        key_point="Separate observed facts, boundaries, gaps, and decisions.",
+        purpose="evidence",
+        visual_brief="A layered evidence landscape with a protected text zone.",
+        image_type=evidence_type,
+    )
+    assert evidence_query.startswith("enterprise AI agents")
+    assert "measurement baseline attribution and risk evidence" in evidence_query
+    assert "no labels no dashboard" in evidence_query
+    assert len(evidence_query) <= 220
 
 
 def create_slide_deck(client) -> dict:

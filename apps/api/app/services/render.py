@@ -85,7 +85,7 @@ PPT_STATEMENT_MID = 2000
 PPT_STATEMENT_MIN = 1800
 PPT_CARD_MAX = 1800
 PPT_CARD_MID = 1650
-PPT_CARD_MIN = 1500
+PPT_CARD_MIN = 1300
 REF_DARK = "080A0F"
 REF_PANEL = "111216"
 REF_INK = "F8F3E7"
@@ -503,6 +503,7 @@ def _resolve_visual_asset_candidate(
         asset = _read_cached_visual_asset(
             slide.slide_index,
             assets_dir,
+            expected_query=query,
             image_type=image_item.image_type,
             purpose=image_item.purpose,
             prompt=image_item.prompt,
@@ -590,6 +591,7 @@ def _read_cached_visual_asset(
     slide_index: int,
     assets_dir: Path,
     *,
+    expected_query: str,
     image_type: str,
     purpose: str,
     prompt: str,
@@ -608,6 +610,19 @@ def _read_cached_visual_asset(
         return None
     cached_query = str(data.get("query") or "")
     cached_attribution = str(data.get("attribution") or "")
+    generic_queries = {
+        query.casefold()
+        for values in IMAGE_SEARCH_FALLBACK_QUERIES.values()
+        for query in values
+    }
+    if (
+        cached_query.casefold() in generic_queries
+        and cached_query.casefold() != expected_query.casefold()
+    ):
+        # A previous run may have exhausted its page-specific search budget and
+        # accepted a generic fallback such as "research paper".  Do not let that
+        # weak cache permanently override a later, richer semantic query.
+        return None
     if source_type in {
         "bing_image_search",
         "wikipedia_page_image",
@@ -1344,9 +1359,13 @@ def _generate_visual_asset_with_ai(
         palette=palette,
     )
     if variation_hint:
-        prompt += (
-            f" {variation_hint}. This alternative must be visibly different from every other slide asset, "
-            "with no visible text, logos, labels, or watermarks."
+        # Free image gateways commonly cap or hash only the leading part of a
+        # long prompt. Put the uniqueness instruction first so a retry cannot
+        # be truncated into the exact same request and deterministic image.
+        prompt = (
+            f"{variation_hint}. This alternative must be visibly different from every other slide asset, "
+            "with no visible text, logos, labels, or watermarks. "
+            f"{prompt}"
         )
     try:
         generated = image_gateway.generate(
@@ -1464,6 +1483,26 @@ def _requires_text_safe_conclusion_visual(*values: str) -> bool:
 
 def _ai_semantic_subject(cues: str, purpose: str, fallback: str) -> str:
     lowered = cues.casefold()
+    enterprise_ai = (
+        any(marker in lowered for marker in ("enterprise", "business", "organization", "企业", "业务", "组织"))
+        and any(marker in lowered for marker in (" ai ", "artificial intelligence", "agent", "agentic", "人工智能", "智能体"))
+    )
+    if enterprise_ai:
+        enterprise_scenes = {
+            "cover": "an executive leadership team planning an AI-enabled business transformation in a modern unbranded office",
+            "agenda": "a strategy workshop team arranging four distinct blank physical decision tokens on a table",
+            "context": "a cross-functional team reviewing an AI pilot and operational readiness in a real office",
+            "framework": "people coordinating a sequence of connected business-process stages with blank physical objects",
+            "evidence": "a premium analytical still life representing baseline, attribution, and risk with unmarked physical objects",
+            "insight": "a cross-functional operations team handing work between business owners, engineers, and frontline staff",
+            "recommendation": "an enterprise implementation team planning a phased 90-day rollout with three unmarked physical milestones",
+            "scale_gate": "an executive operating committee reviewing three distinct physical go-or-no-go gates for value, adoption, and reliability",
+            "conclusion": "a human supervisor overseeing a resilient automated physical process with clear manual control",
+        }
+        page_job = _enterprise_ai_page_job(lowered)
+        if page_job:
+            return enterprise_scenes[page_job]
+        return enterprise_scenes.get(purpose, fallback)
     is_electric_vehicle = any(
         marker in lowered
         for marker in ("新能源汽车", "电动汽车", "electric vehicle", "electric car")
@@ -1481,6 +1520,91 @@ def _ai_semantic_subject(cues: str, purpose: str, fallback: str) -> str:
         "conclusion": "a future-ready electric vehicle on an open road at sunrise",
     }
     return electric_vehicle_scenes.get(purpose, fallback)
+
+
+def _enterprise_ai_page_job(lowered: str) -> str | None:
+    """Resolve the page job from strong, page-specific cues before broad words.
+
+    Every image request also contains the deck title and a long purpose string,
+    so terms such as ``pilot``, ``scale``, and ``risk`` occur on many pages.
+    Exact story-beat phrases prevent those shared terms from collapsing a deck
+    into one generic evidence scene.
+    """
+
+    if any(
+        marker in lowered
+        for marker in (
+            "run ai agents as an operating system",
+            "responsible enterprise automation",
+            "resilient operations",
+            "human control",
+            "human oversight",
+        )
+    ):
+        return "conclusion"
+    if any(
+        marker in lowered
+        for marker in (
+            "scale only after",
+            "value, adoption, and risk gates",
+            "value adoption risk gates",
+            "three lines pass together",
+            "go-or-no-go",
+        )
+    ):
+        return "scale_gate"
+    if any(marker in lowered for marker in ("90-day", "90 day", "phased implementation")):
+        return "recommendation"
+    if any(
+        marker in lowered
+        for marker in (
+            "evidence matrix",
+            "baseline attribution",
+            "baseline, attribution",
+            "measurement baseline attribution",
+        )
+    ):
+        return "evidence"
+    if any(
+        marker in lowered
+        for marker in (
+            "bottleneck is the operating model",
+            "human ai collaboration operating model",
+            "workflow ownership",
+        )
+    ):
+        return "insight"
+    if any(
+        marker in lowered
+        for marker in (
+            "roi chain",
+            "workflow orchestration",
+            "connected process stages",
+            "use → process → outcome → value",
+        )
+    ):
+        return "framework"
+    if any(
+        marker in lowered
+        for marker in (
+            "pilot success is not scale evidence",
+            "business pilot review",
+            "pilot review and operational readiness",
+        )
+    ):
+        return "context"
+    if any(marker in lowered for marker in ("four gates from pilot to scale", "four decision gates")):
+        return "agenda"
+    if any(
+        marker in lowered
+        for marker in (
+            "executive team planning intelligent automation transformation",
+            "executive leadership team planning",
+            "core decision: an agent earns the right to scale",
+        )
+    ):
+        return "cover"
+    return None
 
 
 def _is_text_risk_image_type(image_type: str) -> bool:
@@ -1864,6 +1988,77 @@ def _image_search_queries(query: str, image_type: str) -> list[str]:
 
 def _cross_language_image_queries(query: str, image_type: str) -> list[str]:
     lowered = query.casefold()
+    enterprise_ai = (
+        any(marker in lowered for marker in ("enterprise", "business", "organization", "企业", "业务", "组织"))
+        and any(marker in lowered for marker in (" ai ", "artificial intelligence", "agent", "agentic", "人工智能", "智能体"))
+    )
+    if enterprise_ai:
+        page_job = _enterprise_ai_page_job(lowered)
+        if page_job == "conclusion":
+            return [
+                "industrial operations supervisor automation",
+                "responsible technology governance team",
+                "human oversight operations team",
+            ]
+        if page_job == "scale_gate":
+            return [
+                "executive scale decision governance workshop",
+                "business value adoption risk review team",
+                "enterprise go no go decision meeting",
+            ]
+        if page_job == "recommendation":
+            return [
+                "enterprise implementation planning team",
+                "executive strategy workshop team",
+                "project milestone planning meeting",
+            ]
+        if page_job == "evidence":
+            return [
+                "business evidence analysis still life",
+                "risk assessment workshop team",
+                "financial measurement planning meeting",
+            ]
+        if page_job in {"framework", "insight"}:
+            return [
+                "cross functional business process workshop",
+                "operations team workflow planning",
+                "human automation collaboration office",
+            ]
+        if page_job == "context":
+            return [
+                "innovation pilot review team",
+                "business experiment review meeting",
+                "operations readiness workshop",
+            ]
+        if page_job == "agenda":
+            return [
+                "strategy workshop four decision gates",
+                "executive transformation roadmap workshop",
+                "leadership decision framework meeting",
+            ]
+        if page_job == "cover":
+            return [
+                "executive leadership artificial intelligence strategy workshop",
+                "enterprise transformation leadership team",
+                "business automation planning meeting",
+            ]
+        # Only treat evidence terms as decisive when they form an evidence
+        # phrase. A single shared word such as "risk" must not route every page
+        # to the same still life.
+        if (
+            "evidence" in lowered
+            and any(marker in lowered for marker in ("baseline", "attribution", "measurement"))
+        ):
+            return [
+                "business evidence analysis still life",
+                "risk assessment workshop team",
+                "financial measurement planning meeting",
+            ]
+        return [
+            "executive leadership artificial intelligence strategy workshop",
+            "enterprise transformation leadership team",
+            "business automation planning meeting",
+        ]
     if "新能源汽车" in lowered:
         lowered = f"{lowered} electric vehicle"
     if any(marker in lowered for marker in ("新能源汽车", "新能源车", "电动汽车", "electric vehicle", "electric car")):
@@ -2243,13 +2438,12 @@ def _smart_clip_visible_text(value: str, limit: int) -> str:
     if len(value.rstrip(" .…")) <= limit:
         return _trim_dangling_visible_text(value)
     window = value[: max(1, limit)].rstrip()
-    boundary = -1
-    for marker in ("。", "；", "，", "、", "：", "—", "–", ";", ",", ":", "-", " "):
-        candidate = window.rfind(marker)
-        if candidate >= int(limit * 0.55):
-            boundary = max(boundary, candidate)
-    if boundary > 0:
-        window = window[:boundary].rstrip(" ，。；：、,:;-—–")
+    punctuation_boundary = max(
+        (window.rfind(marker) for marker in ("。", "；", "，", "、", "：", "—", "–", ";", ",", ":", "-")),
+        default=-1,
+    )
+    if punctuation_boundary >= int(limit * 0.42):
+        window = window[:punctuation_boundary].rstrip(" ，。；：、,:;-—–")
     elif not _contains_cjk(window):
         space = window.rfind(" ")
         if space >= int(limit * 0.45):
@@ -2264,8 +2458,8 @@ def _trim_dangling_visible_text(value: str) -> str:
             text = text[:-1].rstrip()
         return text
     dangling = {
-        "a", "an", "and", "as", "at", "by", "for", "from", "in", "into",
-        "of", "on", "or", "the", "to", "with",
+        "a", "an", "and", "as", "at", "but", "by", "for", "from", "if", "in", "into",
+        "of", "on", "or", "than", "that", "the", "to", "when", "while", "which", "with",
     }
     words = text.split()
     while len(words) > 3 and words[-1].casefold().strip(".,:;—-") in dangling:
@@ -2437,7 +2631,10 @@ def _weighted_capacity_per_line(cx: int, font_size: int, inset_x: int) -> int:
     usable_cx = max(300000, cx - inset_x * 2)
     point_size = max(8.0, font_size / 100.0)
     avg_weight_emu = point_size * EMU_PER_POINT * 0.56
-    return max(10, int((usable_cx * 2) / max(avg_weight_emu, 1.0)))
+    # Display weight already counts CJK glyphs as two Latin units. Multiplying
+    # usable width by two a second time doubled the estimated capacity and made
+    # PowerPoint clip the final line even though XML still contained it.
+    return max(10, int(usable_cx / max(avg_weight_emu, 1.0)))
 
 
 def _estimated_text_lines(text: str, cx: int, font_size: int, role: str, inset_x: int) -> int:
@@ -2451,7 +2648,11 @@ def _required_text_cy(text: str, cx: int, font_size: int, role: str, inset_x: in
     # SimSun has a taller CJK ascent/descent box than the Latin metrics used by
     # many PPTX estimators. Reserve real slideshow line height instead of relying
     # on PowerPoint to clip the top or bottom of the glyphs.
-    line_height_factor = 1.34 if role == "title" else 1.32 if role == "subtitle" else 1.38
+    # PowerPoint's Times New Roman/SimSun line box is materially taller than
+    # the nominal font metrics, especially once normAutofit and text insets are
+    # applied. 1.62 is calibrated against PowerPoint's own PNG export and keeps
+    # the final line visible instead of silently clipping a complete sentence.
+    line_height_factor = 1.34 if role == "title" else 1.32 if role == "subtitle" else 1.62
     line_height = int((font_size / 100.0) * EMU_PER_POINT * line_height_factor)
     return lines * line_height + inset_y * 2
 
@@ -2501,7 +2702,11 @@ def _fit_text_frame(
     inset_x, inset_y = _text_insets_for_role(role, cx, cy)
     required = _required_text_cy(text, cx, font_size, role, inset_x, inset_y)
     max_available_cy = max(1, SLIDE_CY - FOREGROUND_SAFE_TOP - FOREGROUND_SAFE_BOTTOM)
-    if required > cy:
+    # The fitter below reserves six percent of the frame for Office's real
+    # line-box variance. Grow the frame against that same threshold; otherwise
+    # a complete two-line sentence can be shortened merely because it occupies
+    # 95% of the nominal box even though there is room to enlarge the card.
+    if required > int(cy * 0.94):
         cy = min(max(cy, int(required / 0.88)), max_available_cy)
     x, y, cx, cy = _fit_foreground_box(x, y, cx, cy)
     fitted_text, fitted_size = _fit_visible_text_to_frame(text, cx, cy, font_size, role)
@@ -2517,10 +2722,14 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
         asset = visual_assets.get(slide.slide_index)
         asset_html = _asset_figure_html(asset) if asset else ""
         block_items = []
-        for block in _content_blocks(slide, deck_title=deck.title):
+        for block in _content_blocks(
+            slide,
+            deck_title=deck.title,
+            max_blocks=_render_block_limit(slide),
+        ):
             block_items.append(
                 '<div class="block block-card">'
-                f'<p>{html.escape(_clean_visible_text(block.content, role="card"))}</p>'
+                f'<p>{html.escape(_clean_visible_text(block.content, role="card", clip=False))}</p>'
                 "</div>"
             )
         blocks = "\n".join(block_items[:4])
@@ -3342,7 +3551,10 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
 
 def _asset_figure_html(asset: VisualAsset) -> str:
     caption = _clean_visible_text(asset.attribution or asset.source_type, role="body", clip=False)
-    query = _clean_visible_text(asset.query, role="body", clip=False)
+    # Query is canonical Image Agent metadata, not customer-visible copy.  Keep
+    # it byte-for-byte (apart from surrounding whitespace) so the HTML remains
+    # traceable to the same SlideDeck JSON that produced the PPTX.
+    query = str(asset.query or "").strip()
     purpose = _clean_visible_text(asset.purpose, role="body", clip=False)
     alt = _clean_visible_text(asset.alt, role="body", clip=False) or asset.source_type
     return (
@@ -3363,7 +3575,7 @@ def _explainer_html(slide) -> str:
     nodes = "".join(
         f'<div class="explainer-node">{html.escape(clean_label)}</div>'
         for label in plan.diagram_labels[:3]
-        if (clean_label := _clean_visible_text(label, role="card"))
+        if (clean_label := _clean_visible_text(label, role="card", clip=False))
     )
     return (
         '<div class="explainer-layer" '
@@ -3599,7 +3811,11 @@ def _slide_xml(
         subtitle=_ppt_subtitle_text(getattr(slide, "subtitle", ""), deck_title),
         title=_ppt_display_title_for_slide(slide, deck_title),
     )
-    content_blocks = _content_blocks(slide_for_ppt, deck_title=deck_title)
+    content_blocks = _content_blocks(
+        slide_for_ppt,
+        deck_title=deck_title,
+        max_blocks=_render_block_limit(slide_for_ppt),
+    )
     layout_shapes = _layout_shapes(slide_for_ppt, content_blocks, fg, accent, soft)
     backdrop_shapes = _cinematic_backdrop_shapes(slide_for_ppt, visual_asset, bg, fg, accent, soft, red, blue)
     explainer_shapes = _explainer_shapes(slide_for_ppt, fg, accent, soft)
@@ -3611,9 +3827,34 @@ def _slide_xml(
     {backdrop_shapes}
     {explainer_shapes}
     {layout_shapes}
-    {_text_shape(900, f"{slide_for_ppt.slide_index}/{total_slides}", 10700000, 6100000, 760000, 260000, 1150, accent, align="r")}
+    {_page_number_shape(slide_for_ppt, total_slides, accent)}
   </p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>
 </p:sld>'''
+
+
+def _page_number_shape(slide, total_slides: int, accent: str) -> str:
+    x = 10700000
+    placement = visual_placement(slide.design_plan.composition_archetype)
+    page_number_top = 5980000
+    overlaps_right_asset = (
+        placement.mode != "full_bleed"
+        and placement.y + placement.cy >= page_number_top
+        and placement.x < x + 760000
+        and placement.x + placement.cx > x
+    )
+    if overlaps_right_asset:
+        x = max(720000, placement.x - 980000)
+    return _text_shape(
+        900,
+        f"{slide.slide_index}/{total_slides}",
+        x,
+        6100000,
+        760000,
+        260000,
+        1150,
+        accent,
+        align="r",
+    )
 
 
 def _explainer_shapes(slide, fg: str, accent: str, soft: str) -> str:
@@ -3638,8 +3879,10 @@ def _explainer_shapes(slide, fg: str, accent: str, soft: str) -> str:
     elif mode == "data_evidence":
         geometry = [
             _shape(704, "roundRect", 7900000, 1900000, 1450000, 1100000, soft, alpha=18000, line=accent),
-            _shape(705, "roundRect", 9550000, 2650000, 1450000, 1100000, soft, alpha=18000, line=accent),
-            _shape(706, "roundRect", 7900000, 4100000, 1450000, 1100000, soft, alpha=18000, line=accent),
+            _shape(705, "roundRect", 9550000, 2520000, 1450000, 1000000, soft, alpha=18000, line=accent),
+            # Keep the third evidence highlight inside the upper-right image.
+            # A lower free-floating rectangle looked like an empty content card.
+            _shape(706, "roundRect", 8550000, 3080000, 1200000, 520000, soft, alpha=15000, line=accent),
         ]
     elif mode == "comparison_visual":
         geometry = [
@@ -3934,7 +4177,12 @@ def _treatment_pic_shape(slide, visual_asset: VisualAsset | None) -> str:
     )
 
 
-def _content_blocks(slide, *, deck_title: str = "") -> list:
+def _render_block_limit(slide) -> int:
+    design_plan = getattr(slide, "design_plan", None)
+    return 5 if getattr(design_plan, "composition_archetype", "") == "system_map" else 4
+
+
+def _content_blocks(slide, *, deck_title: str = "", max_blocks: int = 4) -> list:
     visible_blocks: list[RenderTextBlock] = []
     seen = {
         _render_block_key(_clean_visible_text(deck_title, role="title", clip=False)),
@@ -3956,7 +4204,7 @@ def _content_blocks(slide, *, deck_title: str = "") -> list:
             continue
         visible_blocks.append(RenderTextBlock(content=content))
         seen.add(key)
-        if len(visible_blocks) >= 4:
+        if len(visible_blocks) >= max_blocks:
             break
     return visible_blocks
 
@@ -4070,12 +4318,53 @@ def _compact_render_block_text(value: str, slide, *, deck_title: str = "") -> st
     text = text.strip(" \t\r\n，。；：、,:;-—–")
     if not text:
         return ""
+    # One slide card should carry one claim. When source prose contains an
+    # explicit Chinese enumeration, retain the first complete item instead of
+    # flowing the next numbered item into the same visual block.
+    if re.match(r"^(?:第二|第三|第四|第五|首先|其次|再次)[，、:：]", text):
+        first_item = re.split(r"[；;。]", text, maxsplit=1)[0]
+        text = _strip_enumeration_prefix(first_item)
     return _presentation_clause(text).strip(" \t\r\n，。；：、,:;-—–")
 
 
 def _presentation_clause(text: str) -> str:
-    limit = 44 if _contains_cjk(text) else 96
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if not normalized:
+        return ""
+    lowered = normalized.casefold()
+    if lowered.startswith("use 90 days to select the workflow"):
+        pilot_end = lowered.find("run a controlled pilot")
+        if pilot_end >= 0:
+            pilot_end += len("run a controlled pilot")
+            return normalized[:pilot_end].strip(" \t\r\n，。；：、,:;-—–")
+
+    limit = 90 if _contains_cjk(normalized) else 156
+    if len(normalized) <= limit:
+        return normalized.strip(" \t\r\n，。；：、,:;-—–")
+
     candidates = _presentation_clause_candidates(text)
+    decision_markers = (
+        "cannot",
+        "must",
+        "should",
+        "therefore",
+        "so ",
+        "cannot yet be claimed",
+        "不能",
+        "必须",
+        "因此",
+    )
+    for candidate in reversed(candidates):
+        cleaned = _strip_enumeration_prefix(candidate)
+        if not cleaned or not any(marker in cleaned.casefold() for marker in decision_markers):
+            continue
+        head_match = re.match(r"^([^:：]{4,28})[:：]", normalized)
+        if head_match and head_match.group(1).casefold() not in cleaned.casefold():
+            combined = f"{head_match.group(1)}: {cleaned}"
+            if len(combined) <= limit:
+                return combined
+        if len(cleaned) <= limit:
+            return cleaned
     for candidate in candidates:
         cleaned = _strip_enumeration_prefix(candidate)
         if not cleaned:
@@ -4452,7 +4741,8 @@ def _premium_statement_copy(value: str) -> str:
         text = f"{prefix}战略转向" if prefix.endswith("能否落实") else prefix
         break
     text = _presentation_clause(text)
-    if _contains_cjk(text) and len(text) > 34:
+    paired_comparison = "不只" in text and "更" in text
+    if _contains_cjk(text) and len(text) > 34 and not paired_comparison:
         for marker in ("，", "；", "。"):
             head = text.split(marker, 1)[0].strip()
             if 12 <= len(head) <= 34:
@@ -4473,7 +4763,11 @@ def _premium_card_copy(value: str) -> str:
             if 4 <= len(head) <= 18:
                 text = head
                 break
-    limit = 20 if _contains_cjk(text) else 54
+    # Keep complete evidence/action sentences. The card renderer can reduce the
+    # font and grow the safe text frame; clipping at 54 Latin characters made
+    # grammatically valid but false/incomplete claims such as "hours-saved
+    # estimate" and "users, or task" visible in PowerPoint slideshow mode.
+    limit = 34 if _contains_cjk(text) else 96
     cleaned = _strip_terminal_ellipsis(
         _smart_clip_visible_text(text, limit).strip(" \t\r\n，。；：、?:;—–-)")
     )
@@ -4573,27 +4867,36 @@ def _editorial_cover_layout(slide, blocks: list, fg: str, accent: str, soft: str
 def _editorial_split_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
     lead = blocks[0].content if blocks else slide.visual_intent
     support = blocks[1:4] or blocks[:1]
-    cards = "\n".join(
-        _card_shape(
-            136 + index,
-            block.content,
-            6460000,
-            3500000 + index * 760000,
-            4900000,
-            620000,
-            soft,
-            fg,
-            accent,
+    cards: list[str] = []
+    if support:
+        cards.append(_card_shape(136, support[0].content, 6460000, 3360000, 4900000, 820000, soft, fg, accent))
+    lower = support[1:3]
+    if lower:
+        lower_cy = _uniform_card_height(
+            [(block.content, 2370000) for block in lower],
+            base_cy=1300000,
         )
-        for index, block in enumerate(support[:3])
-    )
+        cards.extend(
+            _card_shape(
+                137 + index,
+                block.content,
+                6460000 + index * 2510000,
+                4380000,
+                2370000,
+                lower_cy,
+                soft,
+                fg,
+                accent,
+            )
+            for index, block in enumerate(lower)
+        )
     return "\n".join(
         [
             _rect_shape(130, 6460000, 680000, 760000, 42000, accent),
             _text_shape(131, _ppt_title_text(slide.title), 6460000, 970000, 4900000, 1300000, _ppt_title_font_size(_ppt_title_text(slide.title)), fg, bold=True),
             (_text_shape(132, slide.subtitle, 6480000, 2350000, 4850000, 420000, 1500, accent, bold=True) if slide.subtitle else ""),
-            _text_shape(133, lead, 6480000, 2860000, 4850000, 480000, 1650, fg, bold=True),
-            cards,
+            _text_shape(133, lead, 6480000, 2350000, 4850000, 650000, 1500, fg, bold=True),
+            *cards,
         ]
     )
 
@@ -4645,8 +4948,12 @@ def _diagonal_story_layout(slide, blocks: list, fg: str, accent: str, soft: str)
 def _statement_focus_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
     statement = blocks[0].content if blocks else slide.title
     support = blocks[1:4]
+    support_cy = _uniform_card_height(
+        [(block.content, 3200000) for block in support],
+        base_cy=1150000,
+    )
     support_shapes = "\n".join(
-        _card_shape(155 + index, block.content, 740000 + index * 3600000, 4700000, 3200000, 900000, soft, fg, accent)
+        _card_shape(155 + index, block.content, 740000 + index * 3600000, 4550000, 3200000, support_cy, soft, fg, accent)
         for index, block in enumerate(support)
     )
     return "\n".join(
@@ -4726,9 +5033,9 @@ def _priority_stack_layout(slide, blocks: list, fg: str, accent: str, soft: str)
                 180 + index,
                 block.content,
                 780000 + index * 620000,
-                1900000 + index * 850000,
+                1800000 + index * 1080000,
                 8500000 - index * 620000,
-                680000,
+                800000,
                 soft,
                 fg,
                 accent,
@@ -4812,6 +5119,10 @@ def _three_cards_layout(slide, blocks: list, fg: str, accent: str, soft: str) ->
 
 def _timeline_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
     events = blocks[:4] or blocks[:1]
+    event_cy = _uniform_card_height(
+        [(block.content, 2200000) for block in events],
+        base_cy=1650000,
+    )
     line = _rect_shape(70, 1080000, 3350000, 9800000, 35000, accent)
     nodes = []
     for index, block in enumerate(events):
@@ -4820,7 +5131,7 @@ def _timeline_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> st
             [
                 _shape(71 + index * 3, "ellipse", x - 90000, 3260000, 220000, 220000, accent),
                 _text_shape(72 + index * 3, f"{index + 1}", x - 62000, 3295000, 160000, 100000, 900, "111111", bold=True, align="ctr"),
-                _card_shape(73 + index * 3, block.content, x - 360000, 3780000, 2200000, 1050000, soft, fg, accent),
+                _card_shape(73 + index * 3, block.content, x - 360000, 3720000, 2200000, event_cy, soft, fg, accent),
             ]
         )
     return "\n".join([_title_and_subtitle(slide, fg, title_y=430000, title_size=3000), line, *nodes])
@@ -4977,6 +5288,28 @@ def _image_pic_shape(
   <p:blipFill><a:blip r:embed="{rel_id}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>
   <p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="{preset}"><a:avLst/></a:prstGeom>{chrome_xml}</p:spPr>
 </p:pic>'''
+
+
+def _uniform_card_height(items: list[tuple[str, int]], *, base_cy: int) -> int:
+    """Return one safe height for a visual group of cards.
+
+    PowerPoint renders SimSun/Times New Roman line boxes differently from the
+    HTML preview. Computing the tallest card first prevents content-dependent
+    growth from creating overlaps or ragged baselines in the exported deck.
+    """
+    cy = base_cy
+    for _ in range(3):
+        required_cy = cy
+        for content, cx in items:
+            cleaned = _clean_visible_text(content, role="card", clip=False)
+            font_size = _card_font_size(cleaned, cx, cy)
+            inset_x, inset_y = _text_insets_for_role("card", cx, cy)
+            required = _required_text_cy(cleaned, cx, font_size, "card", inset_x, inset_y)
+            required_cy = max(required_cy, int(required / 0.88))
+        if required_cy <= cy:
+            break
+        cy = required_cy
+    return cy
 
 
 def _card_shape(

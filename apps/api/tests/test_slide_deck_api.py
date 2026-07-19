@@ -1,7 +1,12 @@
 import re
 
 from ai_ppt_contracts import OutlineDecision, SlideDeck
-from app.services.slide_deck import _condense_slide_title, repair_slide_deck_for_quality
+from app.services.slide_deck import (
+    _compact_diagram_label,
+    _condense_slide_title,
+    _repair_visible_copy,
+    repair_slide_deck_for_quality,
+)
 
 
 PROJECT = {
@@ -36,6 +41,68 @@ def test_long_titles_are_condensed_at_semantic_boundaries_without_ellipses() -> 
     assert all(not re.search(r"(?:…|\.{3})$", value) for value in (english, chinese, generic))
     assert len(english) <= 62
     assert len(chinese) <= 30
+
+
+def test_diagram_label_keeps_complete_clause_instead_of_trailing_verb() -> None:
+    source = (
+        "Use 90 days to select the workflow, freeze the baseline, run a controlled pilot, "
+        "measure value and risk in parallel, then continue, redesign, or stop."
+    )
+
+    label = _compact_diagram_label(source)
+
+    assert label in source
+    assert len(label) <= 64
+    assert not label.endswith(" run")
+    assert label == "Use 90 days to select the workflow, freeze the baseline"
+
+
+def test_repaired_visible_copy_prefers_clause_boundary_over_partial_conjunction() -> None:
+    source = (
+        "Evidence boundary: The current source pack defines an evaluation method, but "
+        "enterprise baseline, adoption, outcome, and fully loaded cost data are still missing."
+    )
+
+    repaired = _repair_visible_copy(source, 78)
+
+    assert repaired == "Evidence boundary: The current source pack defines an evaluation method"
+    assert not repaired.endswith(" but")
+
+
+def test_repaired_body_keeps_complete_outline_claim_for_shared_renderers() -> None:
+    source = (
+        "Evidence boundary: The source pack defines an evaluation method, but enterprise baseline, "
+        "adoption, outcome, and fully loaded cost data are still missing; ROI cannot yet be claimed."
+    )
+
+    repaired = _repair_visible_copy(source, 92, preserve_complete=True)
+
+    assert repaired == source.rstrip(".")
+    assert "ROI cannot yet be claimed" in repaired
+
+
+def test_diagram_label_removes_generic_head_and_keeps_complete_evidence_clause() -> None:
+    source = (
+        "Evidence boundary: The current source pack defines an evaluation method, but enterprise "
+        "baseline and cost data are missing."
+    )
+
+    label = _compact_diagram_label(source)
+
+    assert label == "The current source pack defines an evaluation method"
+    assert label in source
+
+
+def test_diagram_label_uses_complete_action_segment_after_timeline_prefix() -> None:
+    timeline = _compact_diagram_label(
+        "Days 1–15: select a frequent, measurable, reversible workflow and freeze baseline."
+    )
+    adoption = _compact_diagram_label(
+        "Adoption line: retention, task coverage, and takeover stay within gate."
+    )
+
+    assert timeline == "reversible workflow and freeze baseline"
+    assert adoption == "retention, task coverage, and takeover stay within gate"
 
 
 def create_project(client) -> None:

@@ -96,6 +96,12 @@ def research_topic_sources(
         except (httpx.HTTPError, OSError, ValueError, TypeError, KeyError):
             warnings.append("Crossref retrieval was unavailable.")
 
+    if _is_enterprise_ai_adoption_topic(query):
+        authoritative_sources = _enterprise_ai_authoritative_sources(language)
+        if authoritative_sources:
+            providers.insert(0, "authoritative-research-library")
+            sources = [*authoritative_sources, *sources]
+
     normalized = _deduplicate_sources(sources)[: max(1, min(max_sources, 8))]
     if normalized:
         minimum_for_strict_logic = min(max_sources, 4)
@@ -144,6 +150,138 @@ def research_topic_sources(
     )
 
 
+def _enterprise_ai_authoritative_sources(language: str) -> list[dict[str, Any]]:
+    """Curated, dated primary/authoritative evidence for enterprise AI adoption.
+
+    Live discovery still runs first.  This library supplies a stable evidence floor
+    when broad scholarly search ranks an adjacent industry paper above the actual
+    decision topic.  Every claim is dated and linked so it can be audited or
+    replaced without changing the outline contract.
+    """
+
+    records = [
+        {
+            "key": "oecd-firm-adoption-2026",
+            "title": "OECD: AI use by firms continued to expand in 2025",
+            "url": "https://www.oecd.org/en/about/news/announcements/2026/01/ai-use-by-individuals-surges-across-the-oecd-as-adoption-by-firms-continues-to-expand.html",
+            "thesis_en": "Firm-level AI adoption expanded across OECD countries in 2025, but adoption remained uneven by company size and industry.",
+            "points_en": [
+                "AI use is spreading, so the management question is shifting from access to repeatable operating value.",
+                "Large and small firms remain at very different adoption stages, which limits one-size-fits-all scale assumptions.",
+            ],
+            "evidence_en": [
+                "In 2025, 20.2% of firms reported using AI, up from 14.2% in 2024 and 8.7% in 2023.",
+                "AI use reached 52.0% among large firms and 17.4% among small firms in 2025.",
+            ],
+            "thesis_zh": "2025 年 OECD 国家企业采用 AI 的比例继续上升，但企业规模与行业之间仍存在明显差异。",
+            "points_zh": [
+                "AI 正从工具可用性问题转向能否形成可重复经营价值的问题。",
+                "大型企业与小型企业处于不同采用阶段，不能套用同一套规模化假设。",
+            ],
+            "evidence_zh": [
+                "2025 年，20.2% 的企业报告使用 AI，高于 2024 年的 14.2% 和 2023 年的 8.7%。",
+                "2025 年大型企业 AI 使用率为 52.0%，小型企业为 17.4%。",
+            ],
+        },
+        {
+            "key": "stanford-ai-index-economy-2025",
+            "title": "Stanford AI Index 2025: Economy",
+            "url": "https://hai.stanford.edu/ai-index/2025-ai-index-report/economy",
+            "thesis_en": "Organizational AI use rose sharply in 2024, while most reported financial gains inside business functions remained modest.",
+            "points_en": [
+                "High adoption does not by itself establish material enterprise value.",
+                "Financial impact must be measured at the workflow and business-function level.",
+            ],
+            "evidence_en": [
+                "In 2024, 78% of survey respondents reported organizational AI use, up from 55% in 2023.",
+                "Most respondents reporting cost savings placed them below 10%, and the most common reported revenue increase was below 5%.",
+            ],
+            "thesis_zh": "2024 年组织采用 AI 的比例大幅上升，但多数业务职能报告的财务收益仍处于较低水平。",
+            "points_zh": [
+                "高采用率本身不能证明企业级价值。",
+                "财务影响必须落到具体工作流和业务职能中测量。",
+            ],
+            "evidence_zh": [
+                "2024 年，78% 的受访者报告所在组织使用 AI，高于 2023 年的 55%。",
+                "多数报告成本节省的受访者将节省幅度归于 10% 以下；最常见的收入增幅低于 5%。",
+            ],
+        },
+        {
+            "key": "mckinsey-state-of-ai-2025",
+            "title": "McKinsey Global Survey 2025: Agents, innovation, and transformation",
+            "url": "https://www.mckinsey.com/capabilities/quantumblack/our-insights/the-state-of-ai",
+            "thesis_en": "Most organizations were still early in enterprise AI scaling in 2025, even as experimentation with agents became common.",
+            "points_en": [
+                "Workflow redesign, not isolated tool deployment, separates higher-value programs from experiments.",
+                "Agent scale remains concentrated in a small number of functions for most organizations.",
+            ],
+            "evidence_en": [
+                "Nearly two-thirds of respondents said their organizations had not begun scaling AI across the enterprise.",
+                "Sixty-two percent reported at least experimenting with AI agents; in any one function, no more than 10% reported scaling them.",
+            ],
+            "thesis_zh": "2025 年多数组织仍处于企业 AI 规模化早期，即使智能体试验已较常见。",
+            "points_zh": [
+                "真正拉开价值差距的是工作流重构，而不是孤立部署工具。",
+                "多数组织的智能体规模化仍集中在少数职能。",
+            ],
+            "evidence_zh": [
+                "近三分之二受访者表示，其组织尚未开始在企业范围内规模化 AI。",
+                "62% 的受访者表示至少在试验 AI 智能体；在任一单一职能中，报告规模化智能体的比例均不超过 10%。",
+            ],
+        },
+        {
+            "key": "nist-genai-profile-2024",
+            "title": "NIST AI 600-1: Generative Artificial Intelligence Profile",
+            "url": "https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence",
+            "thesis_en": "NIST frames trustworthy generative AI as a lifecycle management responsibility spanning design, development, use, and evaluation.",
+            "points_en": [
+                "Risk controls must align with organizational goals and priorities rather than sit outside the operating workflow.",
+                "Evaluation and documented human oversight are part of deployment readiness, not post-launch decoration.",
+            ],
+            "evidence_en": [
+                "NIST AI 600-1 is a cross-sectoral companion profile to AI RMF 1.0 for generative AI.",
+                "The profile proposes actions organizations can use to identify and manage generative-AI risks.",
+            ],
+            "thesis_zh": "NIST 将可信生成式 AI 定义为贯穿设计、开发、使用与评价全生命周期的管理责任。",
+            "points_zh": [
+                "风险控制必须与组织目标和工作流结合，而不是游离在业务运行之外。",
+                "评价机制与有记录的人工监督属于上线准备的一部分。",
+            ],
+            "evidence_zh": [
+                "NIST AI 600-1 是面向生成式 AI 的跨行业 AI RMF 1.0 配套指南。",
+                "该指南提出了组织识别和管理生成式 AI 风险时可采用的行动。",
+            ],
+        },
+    ]
+    use_zh = language == "zh"
+    results: list[dict[str, Any]] = []
+    for record in records:
+        thesis = str(record["thesis_zh" if use_zh else "thesis_en"])
+        key_points = list(record["points_zh" if use_zh else "points_en"])
+        evidence = list(record["evidence_zh" if use_zh else "evidence_en"])
+        title = str(record["title"])
+        url = str(record["url"])
+        results.append(
+            {
+                "schemaVersion": "1.0.0",
+                "sourceId": _source_id("authoritative", str(record["key"])),
+                "sourceType": "url",
+                "title": title,
+                "url": url,
+                "summary": _structured_summary(
+                    topic=title,
+                    thesis=thesis,
+                    key_points=key_points,
+                    evidence=evidence,
+                    ppt_flow=_research_ppt_flow(language, "scholarly", title),
+                    excerpts=[thesis],
+                    source_label="权威研究资料库" if use_zh else "authoritative research library",
+                ),
+            }
+        )
+    return results
+
+
 def _research_query(topic: str, audience: str, language: str) -> str:
     cleaned_topic = _clean_text(topic)
     cleaned_audience = _clean_text(audience)
@@ -189,14 +327,27 @@ def _research_subject(topic: str, language: str) -> str:
 
 def _wikipedia_query(query: str, language: str) -> str:
     normalized = query.lower()
-    if language == "zh" and "人工智能" in query:
-        if "生成式" in query:
-            return "生成式人工智能"
-        return "人工智能"
-    if language != "zh" and "artificial intelligence" in normalized:
-        if "generative" in normalized:
-            return "generative artificial intelligence"
-        return "artificial intelligence"
+    # Keep specific business, scientific, and policy qualifiers in the query.  The
+    # previous implementation collapsed every AI topic to the generic
+    # "artificial intelligence" page, which made a deck about enterprise agent
+    # adoption inherit definitions and consumer applications instead of evidence
+    # about adoption, operating models, and ROI.
+    if language == "zh" and normalized.strip() in {
+        "人工智能",
+        "生成式人工智能",
+        "人工智能（ai）",
+    }:
+        return "生成式人工智能" if "生成式" in query else "人工智能"
+    if language != "zh" and normalized.strip() in {
+        "artificial intelligence",
+        "generative artificial intelligence",
+        "artificial intelligence (ai)",
+    }:
+        return (
+            "generative artificial intelligence"
+            if "generative" in normalized
+            else "artificial intelligence"
+        )
     return query
 
 
@@ -204,7 +355,9 @@ def _scholarly_query(query: str, language: str) -> str:
     normalized = query.lower()
     if "人工智能" in query and _contains_education_context(query):
         return "artificial intelligence higher education teaching learning formative assessment"
-    if "人工智能" in query:
+    if _is_enterprise_ai_adoption_topic(query):
+        return "enterprise AI agents adoption pilot scale ROI operating model governance"
+    if normalized.strip() in {"人工智能", "人工智能（ai）"}:
         return "artificial intelligence"
     if "artificial intelligence" in normalized and _contains_education_context(query):
         return "artificial intelligence higher education teaching learning formative assessment"
@@ -298,7 +451,16 @@ def _openalex_sources(
         url = _https_url(location.get("landing_page_url")) or _https_url(work.get("doi")) or _https_url(work.get("id"))
         if not title or url is None:
             continue
-        if _requires_strict_relevance(topic) and not _is_relevant_result(topic, title, abstract):
+        cross_language_zh_result = (
+            language == "zh"
+            and not re.search(r"[\u3400-\u9fff]", topic)
+            and bool(re.search(r"[\u3400-\u9fff]", f"{title} {abstract}"))
+        )
+        if (
+            _requires_strict_relevance(topic)
+            and not cross_language_zh_result
+            and not _is_relevant_result(topic, title, abstract)
+        ):
             continue
         year = work.get("publication_year")
         cited_by = work.get("cited_by_count")
@@ -358,7 +520,16 @@ def _crossref_sources(
         if not title or url is None:
             continue
         abstract = _clean_text(re.sub(r"<[^>]+>", " ", html.unescape(str(work.get("abstract") or ""))))
-        if _requires_strict_relevance(topic) and not _is_relevant_result(topic, title, abstract):
+        cross_language_zh_result = (
+            language == "zh"
+            and not re.search(r"[\u3400-\u9fff]", topic)
+            and bool(re.search(r"[\u3400-\u9fff]", f"{title} {abstract}"))
+        )
+        if (
+            _requires_strict_relevance(topic)
+            and not cross_language_zh_result
+            and not _is_relevant_result(topic, title, abstract)
+        ):
             continue
         sentences = _sentences(abstract)
         date_parts = (work.get("published") or {}).get("date-parts") or []
@@ -430,15 +601,25 @@ def _structured_summary(
     ppt_flow: list[str],
     excerpts: list[str],
     source_label: str,
+    evidence_matrix: list[str] | None = None,
 ) -> str:
-    return "\n".join(
-        [
+    lines = [
             f"核心主题：{_clip(topic, 180)}",
             f"文章主旨：{_clip(thesis, 420)}",
             "关键论点：",
             *[f"- {_clip(item, 320)}" for item in key_points[:5] if item],
             "重要事实/数据/证据：",
             *[f"- {_clip(item, 320)}" for item in evidence[:4] if item],
+    ]
+    if evidence_matrix:
+        lines.extend(
+            [
+                "证据矩阵：",
+                *[f"- {_clip(item, 420)}" for item in evidence_matrix[:6] if item],
+            ]
+        )
+    lines.extend(
+        [
             "可做成PPT的大纲建议：",
             *[f"- {_clip(item, 260)}" for item in ppt_flow[:4] if item],
             "原文摘录：",
@@ -446,6 +627,7 @@ def _structured_summary(
             f"资料来源：{source_label}",
         ]
     )
+    return "\n".join(lines)
 
 
 def _topic_synthesis_source(
@@ -464,8 +646,45 @@ def _topic_synthesis_source(
         source_evidence.extend(_summary_section_items(summary, "重要事实/数据/证据"))
         excerpts.extend(_summary_section_items(summary, "原文摘录"))
 
-    ai_education = _is_ai_education_topic(f"{topic} {audience}")
-    if language == "zh" and ai_education:
+    topic_context = f"{topic} {audience}"
+    ai_education = _is_ai_education_topic(topic_context)
+    enterprise_ai_adoption = _is_enterprise_ai_adoption_topic(topic_context)
+    if language == "zh" and enterprise_ai_adoption:
+        thesis = (
+            f"“{topic}”的决策重点不是证明智能体能完成一次演示，而是证明它能在受控风险下被持续采用，"
+            "稳定改变业务流程，并把过程改善归因到可衡量的经营结果；从试点走向规模化必须同时通过价值、采用、治理与运行四道门。"
+        )
+        key_points = [
+            "价值链：把模型调用连接到任务采用率、流程周期、质量/错误率、收入或成本结果，避免用调用量替代 ROI。",
+            "证据设计：试点前先冻结基线与对照口径，再记录时间节省、返工、人工复核和业务结果，才能区分相关性与可归因收益。",
+            "运行模型：明确业务负责人、产品/工程、数据、安全与一线使用者的责任，并为人工接管、异常处理和版本变更建立机制。",
+            "规模化门槛：只有当价值可重复、使用可持续、风险可接受、单位经济性成立时，试点才应进入下一轮扩展。",
+        ]
+        ppt_flow = [
+            "先回答为什么大量试点仍难形成可复述的经营价值。",
+            "再用‘使用—流程—业务—财务’四层 ROI 链解释价值如何产生与归因。",
+            "用证据矩阵区分已检索事实、来源元数据、合理推断和仍待补强的内部经营数据。",
+            f"最后为{audience}给出 90 天验证路径与规模化决策门槛。",
+        ]
+    elif language != "zh" and enterprise_ai_adoption:
+        thesis = (
+            f"The decision in {topic} is not whether an agent can complete a demo. It is whether the agent can earn sustained adoption, "
+            "change a business workflow under controlled risk, and produce attributable operating value. Moving from pilot to scale requires "
+            "four gates: value, adoption, governance, and reliable operations."
+        )
+        key_points = [
+            "Value chain: connect model use to task adoption, cycle time, quality or error rates, and then revenue or cost outcomes; invocation volume is not ROI.",
+            "Evidence design: freeze a baseline and comparison method before the pilot, then capture time saved, rework, human review, and business outcomes so attribution can be tested.",
+            "Operating model: assign ownership across business, product, engineering, data, security, and frontline users, with explicit human takeover and exception handling.",
+            "Scale gate: expand only when value repeats, usage persists, risk remains acceptable, and unit economics support the next deployment wave.",
+        ]
+        ppt_flow = [
+            "Start with why many pilots demonstrate feasibility without proving repeatable enterprise value.",
+            "Explain the ROI chain from use to process change, business outcome, and financial value.",
+            "Use an evidence matrix to separate retrieved facts, source metadata, inference, and internal data still required.",
+            f"Close with a 90-day proof path and scale gates for {audience}.",
+        ]
+    elif language == "zh" and ai_education:
         thesis = (
             "生成式人工智能正在把高等教育从“工具使用”推向教学设计、学习支持、评价方式与治理机制的协同重构；"
             "它的价值取决于能否提升学习质量，同时守住事实核验、学术诚信与自主判断的边界。"
@@ -518,7 +737,17 @@ def _topic_synthesis_source(
         ]
 
     evidence_seeds: list[str] = []
-    if language == "zh" and ai_education:
+    if language == "zh" and enterprise_ai_adoption:
+        evidence_seeds = [
+            "可交付的 ROI 证据必须同时说明试点前基线、测量窗口、业务结果、归因方法、人工复核成本与风险事件，不能只报告模型能力或调用量。",
+            "公开来源可以支撑行业背景与方法框架；客户自身的采用率、流程指标、财务口径和风险记录仍需作为内部证据补齐。",
+        ]
+    elif language != "zh" and enterprise_ai_adoption:
+        evidence_seeds = [
+            "Delivery-grade ROI evidence must state the pre-pilot baseline, measurement window, business outcome, attribution method, human-review cost, and risk events—not only model capability or usage volume.",
+            "Public sources can support the market context and evaluation method; customer adoption, workflow, financial, and risk data remain required as internal evidence.",
+        ]
+    elif language == "zh" and ai_education:
         evidence_seeds = [
             "公开资料与论文检索共同指向：AI 在高等教育中的价值需要同时评估教学设计、学习支持、评价方式和治理边界。",
             "形成性评价场景尤其需要过程证据、反馈闭环和学术诚信约束，不能只用生成速度衡量效果。",
@@ -536,6 +765,11 @@ def _topic_synthesis_source(
     else:
         combined_evidence = _unique_text_items(source_evidence)[:4]
     combined_excerpts = _unique_text_items([*excerpts, *source_theses])[:3]
+    evidence_matrix = _build_evidence_matrix(
+        topic=topic,
+        language=language,
+        sources=sources,
+    )
     summary = _structured_summary(
         topic=topic,
         thesis=thesis,
@@ -544,6 +778,7 @@ def _topic_synthesis_source(
         ppt_flow=ppt_flow,
         excerpts=combined_excerpts or [thesis],
         source_label="公开资料综合" if language == "zh" else "public-source synthesis",
+        evidence_matrix=evidence_matrix,
     )
     summary = "\n".join(
         [
@@ -576,6 +811,34 @@ def _logic_chain_summary(
     key_points: list[str],
     evidence: list[str],
 ) -> str:
+    if _is_enterprise_ai_adoption_topic(f"{topic} {audience}"):
+        if language == "zh":
+            return "\n".join(
+                [
+                    "PPT 逻辑链：",
+                    "核心问题：哪个工作流值得规模化、服务谁、处于什么风险边界？",
+                    "为什么是现在：企业采用率持续上升，但规模化程度和财务影响仍不均衡。",
+                    "作用机制：持续任务采用必须先带来流程变化，才能把经营结果归因到智能体。",
+                    "证据地图：",
+                    "- 外部证据：采用趋势、规模化成熟度与治理要求。",
+                    "- 内部证据：基线、对照、流程结果、完整成本与风险事件。",
+                    "风险边界：公开资料不能替代客户 ROI；内部数据必须闭合归因链。",
+                    "面向受众的行动：选择一个高频、可测、可回退的流程，用 90 天完成继续、调整或停止决策。",
+                ]
+            )
+        return "\n".join(
+            [
+                "PPT logic chain:",
+                "Central question: which workflow merits scaling, for whom, and within what risk boundary?",
+                "Why now: enterprise adoption is rising, while scaling maturity and financial impact remain uneven.",
+                "Mechanism: sustained task use must change a workflow before business value can be attributed to an agent.",
+                "Evidence map:",
+                "- External evidence: adoption trends, scaling maturity, and governance requirements.",
+                "- Internal evidence: baseline, comparison, process outcome, fully loaded cost, and risk events.",
+                "Risk boundary: public evidence cannot prove a client's ROI; internal data must close the attribution chain.",
+                "Action for audience: select one frequent, measurable, reversible workflow and use 90 days to continue, redesign, or stop.",
+            ]
+        )
     first_point = key_points[0] if key_points else thesis
     second_point = key_points[1] if len(key_points) > 1 else first_point
     evidence_line = evidence[0] if evidence else "public sources provide context but still require verification"
@@ -665,12 +928,89 @@ def _is_relevant_result(query: str, title: str, extract: str) -> bool:
     if not terms:
         return True
     haystack = f"{title} {extract}".lower()
-    return any(term.lower() in haystack for term in terms)
+    matches = {term for term in terms if term.lower() in haystack}
+    if not matches:
+        return False
+    if not _requires_strict_relevance(query):
+        return True
+    # A specific query needs more than one generic overlap.  This prevents a
+    # result about "AI applications" from entering a research pack about agent
+    # adoption and measurable ROI merely because both contain the token "AI".
+    required_matches = 2 if len(terms) >= 3 else 1
+    if len(matches) < required_matches:
+        return False
+    if _is_enterprise_ai_adoption_topic(query):
+        adoption_terms = {
+            "agent",
+            "agents",
+            "agentic",
+            "adoption",
+            "pilot",
+            "scale",
+            "scaling",
+            "roi",
+            "enterprise",
+            "智能体",
+            "采用",
+            "试点",
+            "规模化",
+            "投资回报",
+        }
+        normalized_haystack = haystack.casefold()
+        has_agent = any(
+            term in normalized_haystack
+            for term in ("agent", "agents", "agentic", "intelligent agent", "智能体")
+        )
+        has_enterprise_context = any(
+            term in normalized_haystack
+            for term in (
+                "enterprise",
+                "business",
+                "organization",
+                "workflow",
+                "operating model",
+                "企业",
+                "业务",
+                "组织",
+                "流程",
+                "运行模型",
+            )
+        )
+        has_adoption_or_value = any(
+            term in normalized_haystack
+            for term in (
+                "adoption",
+                "pilot",
+                "scale",
+                "scaling",
+                "deployment",
+                "roi",
+                "return on investment",
+                "采用",
+                "试点",
+                "规模化",
+                "投资回报",
+            )
+        )
+        query_requires_agent = any(
+            term in query.casefold()
+            for term in ("agent", "agentic", "智能体")
+        )
+        if query_requires_agent and not has_agent:
+            return False
+        return (
+            has_adoption_or_value
+            and (has_agent or has_enterprise_context)
+            and any(term in matches for term in adoption_terms)
+        )
+    return True
 
 
 def _requires_strict_relevance(query: str) -> bool:
     normalized = query.lower()
     if any(term in query for term in ("瑞幸", "瑞幸咖啡")) or "luckin" in normalized:
+        return True
+    if len(_query_relevance_terms(query)) >= 3:
         return True
     cjk = re.sub(r"[^㐀-鿿]", "", query)
     return len(cjk) >= 6
@@ -680,11 +1020,19 @@ def _query_relevance_terms(query: str) -> list[str]:
     normalized = query.lower()
     if any(term in query for term in ("瑞幸", "瑞幸咖啡")) or "luckin" in normalized:
         return ["瑞幸", "瑞幸咖啡", "luckin", "luckin coffee"]
+    phrase_terms: list[str] = []
     if "人工智能" in query:
-        return ["人工智能", "artificial intelligence", "生成式人工智能"]
+        phrase_terms.extend(["人工智能", "artificial intelligence"])
+    if "生成式人工智能" in query or "generative artificial intelligence" in normalized:
+        phrase_terms.extend(["生成式人工智能", "generative artificial intelligence"])
     if "artificial intelligence" in normalized:
-        return ["artificial intelligence", "ai"]
-    compact = re.sub(r"[^0-9a-zA-Z\u3400-\u9fff]+", " ", query).strip()
+        phrase_terms.extend(["artificial intelligence", "ai"])
+    compact_source = re.sub(
+        r"(?i)artificial intelligence|generative artificial intelligence",
+        " ",
+        query,
+    )
+    compact = re.sub(r"[^0-9a-zA-Z\u3400-\u9fff]+", " ", compact_source).strip()
     raw_terms = [
         term
         for term in compact.split()
@@ -707,8 +1055,22 @@ def _query_relevance_terms(query: str) -> list[str]:
         "课程",
         "客户",
         "投资人",
+        "the",
+        "and",
+        "for",
+        "from",
+        "into",
+        "with",
+        "about",
+        "research",
+        "analysis",
+        "strategy",
+        "report",
+        "presentation",
+        "measurable",
+        "year",
     }
-    terms: list[str] = []
+    terms: list[str] = list(phrase_terms)
     for term in raw_terms:
         if re.search(r"[\u3400-\u9fff]", term):
             parts = [part for part in re.split(r"[、，,；;：:\s和与的]+", term) if part]
@@ -727,7 +1089,161 @@ def _query_relevance_terms(query: str) -> list[str]:
         lowered = term.lower()
         if lowered and lowered not in unique:
             unique.append(lowered)
-    return unique[:6]
+    return unique[:10]
+
+
+def _is_enterprise_ai_adoption_topic(value: str) -> bool:
+    normalized = value.casefold()
+    ai_terms = (
+        "人工智能",
+        "生成式人工智能",
+        "智能体",
+        "artificial intelligence",
+        "agent",
+        "agentic",
+    )
+    enterprise_terms = (
+        "企业",
+        "组织",
+        "业务",
+        "enterprise",
+        "business",
+        "organization",
+    )
+    adoption_terms = (
+        "采用",
+        "落地",
+        "试点",
+        "规模化",
+        "投资回报",
+        "roi",
+        "adoption",
+        "pilot",
+        "scale",
+        "scaling",
+        "deployment",
+        "value",
+    )
+    return (
+        (
+            any(term in normalized for term in ai_terms)
+            or bool(re.search(r"(?:^|\W)ai(?:$|\W)", normalized, re.IGNORECASE))
+        )
+        and any(term in normalized for term in enterprise_terms)
+        and any(term in normalized for term in adoption_terms)
+    )
+
+
+def _build_evidence_matrix(
+    *, topic: str, language: str, sources: list[dict[str, Any]]
+) -> list[str]:
+    """Create traceable claim-to-decision rows without inventing source facts."""
+
+    rows: list[str] = []
+    for source in sources:
+        summary = str(source.get("summary") or "")
+        source_id = str(source.get("sourceId") or "unknown-source")
+        title = str(source.get("title") or source_id)
+        thesis = _summary_section_value(summary, "文章主旨")
+        evidence = _summary_section_items(summary, "重要事实/数据/证据")
+        candidate = next(
+            (
+                item
+                for item in [*evidence, thesis]
+                if item and not _is_provenance_only_evidence(item)
+            ),
+            thesis or (evidence[0] if evidence else ""),
+        )
+        if not candidate:
+            continue
+        source_text = f"{title} {candidate} {source_id}".casefold()
+        if "research-gap" in source_id or any(
+            marker in source_text
+            for marker in ("待补", "尚缺", "需补", "to verify", "citation needed")
+        ):
+            evidence_type = "缺口" if language == "zh" else "gap"
+            decision_role = "交付前补证" if language == "zh" else "evidence required before delivery"
+        elif any(
+            marker in source_text
+            for marker in ("roi", "return on investment", "投资回报", "profit", "revenue", "cost", "利润", "收入", "成本")
+        ):
+            evidence_type = "事实" if language == "zh" else "fact"
+            decision_role = "价值与归因" if language == "zh" else "value and attribution"
+        elif any(
+            marker in source_text
+            for marker in ("risk", "governance", "security", "privacy", "风险", "治理", "安全", "隐私")
+        ):
+            evidence_type = "边界" if language == "zh" else "boundary"
+            decision_role = "风险与治理" if language == "zh" else "risk and governance"
+        elif any(
+            marker in source_text
+            for marker in ("adoption", "pilot", "deployment", "agent", "采用", "试点", "落地", "智能体")
+        ) or (
+            re.search(r"\d+(?:\.\d+)?%", source_text) is not None
+            and any(marker in source_text for marker in ("ai use", "using ai", "使用 ai"))
+        ):
+            evidence_type = "事实" if language == "zh" else "fact"
+            decision_role = "采用与规模化" if language == "zh" else "adoption and scale"
+        else:
+            evidence_type = "背景" if language == "zh" else "context"
+            decision_role = "决策背景" if language == "zh" else "decision context"
+        complete_title = _complete_matrix_fragment(title, limit=82)
+        complete_candidate = _complete_matrix_fragment(
+            candidate,
+            limit=240,
+            fallback_title=title,
+            language=language,
+        )
+        if language == "zh":
+            row = f"[{evidence_type}] {decision_role}｜{complete_title}｜{complete_candidate}｜来源 {source_id}"
+        else:
+            row = f"[{evidence_type}] {decision_role} | {complete_title} | {complete_candidate} | source {source_id}"
+        if row not in rows:
+            rows.append(row)
+    return rows[:6]
+
+
+def _complete_matrix_fragment(
+    value: str,
+    *,
+    limit: int,
+    fallback_title: str = "",
+    language: str = "en",
+) -> str:
+    """Keep evidence rows readable without presenting clipped prose as a fact."""
+
+    cleaned = _clean_text(value).strip(" |｜")
+    incomplete = "…" in cleaned or bool(re.search(r"\.{3,}", cleaned))
+    if incomplete and fallback_title:
+        title = _clean_text(fallback_title).strip(" |｜")
+        cleaned = (
+            f"资料范围：{title}。"
+            if language == "zh"
+            else f"Source scope: {title}."
+        )
+    if len(cleaned) <= limit:
+        return cleaned
+    candidate = cleaned[:limit]
+    sentence_ends = [match.end() for match in re.finditer(r"[。！？.!?](?=\s|$)", candidate)]
+    if sentence_ends and sentence_ends[-1] >= max(28, limit // 2):
+        return candidate[: sentence_ends[-1]].strip()
+    if language == "zh":
+        return candidate.rstrip(" ，,、;；:：") + "。"
+    boundary = candidate.rfind(" ")
+    if boundary >= max(24, limit // 2):
+        candidate = candidate[:boundary]
+    return candidate.rstrip(" ,;:") + "."
+
+
+def _is_provenance_only_evidence(value: str) -> bool:
+    normalized = " ".join(value.casefold().split())
+    return bool(
+        re.fullmatch(
+            r"(?:publication year|openalex cited-by count|published in)\s*[:：].+",
+            normalized,
+        )
+        or re.fullmatch(r"(?:\d{4}\s*年研究|发表于).+", normalized)
+    )
 
 
 def _summary_section_value(summary: str, heading: str) -> str:
@@ -816,6 +1332,56 @@ def _local_fallback_source(topic: str, audience: str, language: str) -> dict[str
 
 def _local_fallback_profile(topic: str, audience: str, language: str) -> dict[str, list[str] | str]:
     context = f"{topic} {audience}"
+    if _is_enterprise_ai_adoption_topic(context):
+        if language == "zh":
+            return {
+                "thesis": (
+                    f"“{topic}”必须从一次性能力演示升级为可归因的经营改进：面向{audience}，"
+                    "需要同时证明智能体被持续采用、流程指标稳定改善、风险边界可控，并且收益覆盖建设与运行成本。"
+                ),
+                "points": [
+                    "试点目标必须从‘能不能做’改为‘在哪个业务任务上、对谁、在什么风险边界内创造什么结果’。",
+                    "ROI 证据链应按使用、流程、业务、财务四层记录：采用率和人工接管率只是起点，周期、质量、收入或成本才是结果。",
+                    "测量前先冻结基线、对照口径与观察窗口，并把模型、集成、人工复核、合规和运维成本全部计入单位经济性。",
+                    "规模化不是复制提示词，而是复制责任结构、数据权限、异常处理、评估集、版本管理和业务复盘机制。",
+                    "管理层需要以价值可重复、采用可持续、风险可接受、运行可恢复四项门槛决定继续、调整或停止。",
+                ],
+                "evidence": [
+                    "内部证据必需项：试点前基线、任务采用率、人工接管率、流程周期、返工/错误率、业务结果与完整成本。",
+                    "归因必需项：明确对照组或前后对比方法、测量窗口、样本范围、外部变量和数据责任人。",
+                    "交付前待补：与具体行业、企业流程和合规边界对应的公开案例、权威研究与客户内部经营数据。",
+                ],
+                "flow": [
+                    "先解释为什么能力演示不等于规模化价值。",
+                    "再建立‘使用—流程—业务—财务’ROI 链和证据矩阵。",
+                    "把技术、业务、数据、安全和一线运营组织成同一套运行模型。",
+                    f"最后给{audience}一套 90 天验证路径、三类指标和明确的继续/停止门槛。",
+                ],
+            }
+        return {
+            "thesis": (
+                f"{topic} must move from a one-off capability demo to attributable operating improvement. For {audience}, the proof must show "
+                "sustained adoption, repeatable workflow gains, controlled risk, and benefits that exceed build and run cost."
+            ),
+            "points": [
+                "Replace the pilot question ‘can it work?’ with ‘which task, for which user, within which risk boundary, should change which outcome?’",
+                "Build the ROI chain across use, process, business, and financial layers: adoption and human takeover are leading indicators; cycle time, quality, revenue, or cost are outcomes.",
+                "Freeze the baseline, comparison method, and measurement window before launch, and include model, integration, human review, compliance, and operations in unit economics.",
+                "Scale the operating system—not the prompt—by making ownership, data access, exception handling, evaluation sets, version control, and business review repeatable.",
+                "Leadership should use four gates to continue, redesign, or stop: repeatable value, sustained adoption, acceptable risk, and recoverable operations.",
+            ],
+            "evidence": [
+                "Required internal evidence: pre-pilot baseline, task adoption, human takeover, cycle time, rework or error rate, business outcome, and fully loaded cost.",
+                "Required attribution design: comparison method, measurement window, sample scope, external variables, and a named data owner.",
+                "Before delivery, add industry-specific cases, authoritative research, and customer operating data tied to the selected workflow and risk boundary.",
+            ],
+            "flow": [
+                "Explain why capability evidence is not scale evidence.",
+                "Build the use-to-process-to-business-to-financial ROI chain and evidence matrix.",
+                "Define one operating model across business, technology, data, security, and frontline operations.",
+                f"Close with a 90-day proof path, three metric families, and explicit continue-or-stop gates for {audience}.",
+            ],
+        }
     if _is_brand_retail_topic(context):
         if language == "zh":
             return {
@@ -1120,4 +1686,24 @@ def _clean_text(value: str) -> str:
 
 def _clip(value: str, limit: int) -> str:
     cleaned = _clean_text(value)
-    return cleaned if len(cleaned) <= limit else cleaned[: limit - 1].rstrip() + "…"
+    if len(cleaned) <= limit:
+        return cleaned
+    candidate = cleaned[:limit].rstrip()
+    sentence_ends = [
+        match.end()
+        for match in re.finditer(r"[。！？.!?](?=\s|$)", candidate)
+        if match.end() >= max(20, limit // 2)
+    ]
+    if sentence_ends:
+        return candidate[: sentence_ends[-1]].strip()
+    clause_break = max(
+        candidate.rfind(separator)
+        for separator in ("；", ";", "：", ":", "，", ",")
+    )
+    if clause_break >= max(20, limit // 2):
+        return candidate[:clause_break].strip()
+    if not re.search(r"[\u3400-\u9fff]", candidate):
+        word_break = candidate.rfind(" ")
+        if word_break >= max(20, limit // 2):
+            return candidate[:word_break].strip()
+    return candidate.strip()

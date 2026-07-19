@@ -198,6 +198,91 @@ def test_topic_only_outline_researches_public_sources_before_generation(
     )
 
 
+def test_enterprise_ai_outline_replaces_generic_ai_with_roi_decision_story(
+    client, monkeypatch
+) -> None:
+    project = {
+        **PROJECT,
+        "projectId": "enterprise-ai-outline",
+        "outputLanguage": "en",
+        "deckType": "business_pitch",
+        "topic": "Enterprise AI Agent Adoption 2026: From Pilot to Measurable ROI",
+        "audience": "Executive leadership and business owners",
+        "agentMode": "research",
+    }
+    client.app.state.settings.topic_research_enabled = True
+    assert create_project(client, project).status_code == 201
+    source_pack = SourcePack(
+        schemaVersion="1.0.0",
+        projectId=project["projectId"],
+        sources=[
+            {
+                "schemaVersion": "1.0.0",
+                "sourceId": "web-research-synthesis-enterprise-ai",
+                "sourceType": "text",
+                "title": "Enterprise AI Agent Adoption: public-source synthesis",
+                "summary": "\n".join(
+                    [
+                        "核心主题：Enterprise AI Agent Adoption 2026: From Pilot to Measurable ROI",
+                        "文章主旨：Artificial intelligence is the capability of computational systems to perform tasks.",
+                        "关键论点：",
+                        "- High-profile applications of AI include web search engines and chatbots.",
+                        "重要事实/数据/证据：",
+                        "- Publication year: 2026",
+                    ]
+                ),
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "app.routes.outline.research_topic_sources",
+        lambda **_: TopicResearchResult(
+            source_pack=source_pack,
+            mode="web",
+            providers=["test-provider"],
+            query=project["topic"],
+            warnings=[],
+        ),
+    )
+
+    response = generate_outline(client, project["projectId"])
+
+    assert response.status_code == 200
+    outline = response.json()["outlineDecision"]
+    titles = [slide["title"] for slide in outline["slides"]]
+    visible = " ".join(
+        [
+            *titles,
+            *[slide["keyPoint"] for slide in outline["slides"]],
+            *[
+                point
+                for slide in outline["slides"]
+                for point in slide["talkingPoints"]
+            ],
+        ]
+    )
+    for expected in [
+        "Four gates from pilot to scale",
+        "ROI chain: use → process → outcome → value",
+        "Evidence matrix: baseline, attribution, risk",
+        "A 90-day proof path",
+        "Run AI agents as an operating system",
+    ]:
+        assert expected in titles
+    for expected in [
+        "human takeover",
+        "fully loaded cost",
+        "continue, redesign, or stop",
+        "repeatable business value",
+    ]:
+        assert expected in visible
+    assert "High-profile applications of AI" not in visible
+    assert "translate the conclusion into steps" not in visible
+    assert len({slide["keyPoint"] for slide in outline["slides"]}) == len(
+        outline["slides"]
+    )
+
+
 def test_supplied_source_pack_skips_automatic_topic_research(client, monkeypatch) -> None:
     assert create_project(client).status_code == 201
 

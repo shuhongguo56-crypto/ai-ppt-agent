@@ -1,3 +1,4 @@
+import json
 import re
 import threading
 import time
@@ -300,6 +301,16 @@ def _font_size_for_shape(xml: str, shape_name: str) -> int:
     raise AssertionError(f"shape not found: {shape_name}")
 
 
+def _font_size_for_text(xml: str, text: str) -> int:
+    for shape in re.findall(r"<p:sp>.*?</p:sp>", xml, flags=re.DOTALL):
+        if f"<a:t>{text}</a:t>" not in shape:
+            continue
+        size = re.search(r'\bsz="(\d+)"', shape)
+        assert size is not None
+        return int(size.group(1))
+    raise AssertionError(f"text shape not found: {text}")
+
+
 def test_render_visible_text_cleanup_compacts_titles_and_removes_encoding_damage() -> None:
     assert (
         _clean_visible_text("瑞幸咖啡品牌复兴与新消费增长策略", role="title")
@@ -320,6 +331,63 @@ def test_render_visible_text_cleanup_compacts_titles_and_removes_encoding_damage
     )
     assert compact_title == "人工智能在高等教育课程、评价"
     assert not compact_title.endswith("…")
+
+
+def test_enterprise_render_keeps_complete_claims_instead_of_word_boundary_fragments() -> None:
+    operating_claim = (
+        "The value break usually occurs in workflow ownership, data access, exception handling, "
+        "and measurement—not in whether the model can produce an answer."
+    )
+    pilot_evidence = (
+        "A single success, invocation count, or hours-saved estimate cannot prove ROI alone."
+    )
+    evidence_boundary = (
+        "Evidence boundary: The current source pack defines an evaluation method, but enterprise "
+        "baseline, adoption, outcome, and fully loaded cost data are still missing; ROI cannot yet be claimed."
+    )
+    proof_path = (
+        "Use 90 days to select the workflow, freeze the baseline, run a controlled pilot, "
+        "measure value and risk in parallel, then continue, redesign, or stop."
+    )
+
+    assert render_service._presentation_clause(operating_claim) == operating_claim
+    assert render_service._presentation_clause(pilot_evidence) == pilot_evidence
+    assert render_service._presentation_clause(evidence_boundary) == (
+        "Evidence boundary: ROI cannot yet be claimed"
+    )
+    assert render_service._presentation_clause(proof_path) == (
+        "Use 90 days to select the workflow, freeze the baseline, run a controlled pilot"
+    )
+
+
+def test_enterprise_premium_cards_keep_complete_evidence_sentences() -> None:
+    claims = [
+        "A single success, invocation count, or hours-saved estimate cannot prove ROI alone.",
+        "Scale requires repeatability across time, users, or task cohorts.",
+        "Without baseline and attribution, efficiency cannot enter an investment decision.",
+        "Days 16–60: run a controlled pilot while capturing value, adoption, risk, and fully loaded cost.",
+    ]
+
+    rendered = [render_service._premium_card_copy(claim) for claim in claims]
+
+    assert rendered == [claim.rstrip(".") for claim in claims]
+
+
+def test_card_frame_reserves_powerpoint_slideshow_line_height() -> None:
+    text = "A single success, invocation count, or hours-saved estimate cannot prove ROI alone"
+
+    fitted, _x, _y, _cx, cy, _size, _anchor = render_service._fit_text_frame(
+        text,
+        6_460_000,
+        4_260_000,
+        4_900_000,
+        620_000,
+        1_500,
+        "card",
+    )
+
+    assert fitted == text
+    assert cy >= 760_000
     assert not render_service._clip_for_asset(
         "Enterprise image purpose that is deliberately longer than the compact asset description budget",
         48,
@@ -558,9 +626,12 @@ def test_render_creates_pptx_and_hyperframes_from_same_slide_deck(client) -> Non
     assert "SimSun" in slide1
     assert "Aptos" not in master + slide1
     assert "Microsoft YaHei" not in master + slide1
-    cover_title_size = _font_size_for_shape(slide1, "Text 12")
+    cover_title_size = _font_size_for_text(
+        slide1,
+        deck["slideDeck"]["slides"][0]["title"],
+    )
     assert 3600 <= cover_title_size <= 4800
-    cover_card_size = _font_size_for_shape(slide1, "Card 14")
+    cover_card_size = _font_size_for_text(slide1, PROJECT["audience"])
     assert 1500 <= cover_card_size <= 1800
     assert int(re.search(r"<p:sldLayoutId id=\"(\d+)\"", master).group(1)) >= 2147483648
     assert "ppt/slides/slide1.xml" in names
@@ -742,6 +813,93 @@ def test_coffee_retail_search_uses_page_job_instead_of_ambiguous_chinese_title()
     assert "barista workflow coffee shop" in queries
 
 
+def test_enterprise_ai_search_keeps_page_job_ahead_of_generic_ai_queries() -> None:
+    evidence_queries = render_service._cross_language_image_queries(
+        "enterprise AI agents measurement baseline attribution and risk evidence",
+        "data_visual",
+    )
+    implementation_queries = render_service._cross_language_image_queries(
+        "enterprise AI agents phased 90 day implementation plan",
+        "business_scene",
+    )
+
+    assert evidence_queries[0] == "business evidence analysis still life"
+    assert implementation_queries[0] == "enterprise implementation planning team"
+    assert "artificial intelligence research" not in evidence_queries
+    assert "business strategy meeting" not in implementation_queries
+
+
+def test_enterprise_ai_generation_subject_is_page_specific() -> None:
+    subject = render_service._ai_semantic_subject(
+        "enterprise AI agents pilot review and operational readiness",
+        "context",
+        "business strategy meeting",
+    )
+
+    assert "reviewing an AI pilot" in subject
+    assert subject != "business strategy meeting"
+
+
+def test_enterprise_ai_shared_risk_word_does_not_collapse_page_scenes() -> None:
+    pilot = render_service._ai_semantic_subject(
+        "enterprise AI agents business pilot review; value and risk must hold",
+        "Serves context content by visualizing the slide claim",
+        "business evidence analysis still life",
+    )
+    operating_model = render_service._ai_semantic_subject(
+        "enterprise AI agents: the bottleneck is the operating model; risk is controlled",
+        "Serves context content by visualizing the slide claim",
+        "business evidence analysis still life",
+    )
+    scale_gate = render_service._ai_semantic_subject(
+        "enterprise AI agents: scale only after value, adoption, and risk gates",
+        "Serves context content by visualizing the slide claim",
+        "business evidence analysis still life",
+    )
+
+    assert "reviewing an AI pilot" in pilot
+    assert "handing work between" in operating_model
+    assert "go-or-no-go gates" in scale_gate
+    assert len({pilot, operating_model, scale_gate}) == 3
+
+
+def test_enterprise_ai_search_prioritizes_specific_scale_gate_over_shared_terms() -> None:
+    queries = render_service._cross_language_image_queries(
+        "enterprise AI agents phased plan: scale only after value, adoption, and risk gates",
+        "business_scene",
+    )
+
+    assert queries[0] == "executive scale decision governance workshop"
+
+
+def test_generic_search_fallback_cache_does_not_override_richer_query(tmp_path) -> None:
+    (tmp_path / "slide-9-openverse.jpg").write_bytes(b"\xff\xd8\xff\x00cached")
+    (tmp_path / "slide-9-asset.json").write_text(
+        json.dumps(
+            {
+                "fileName": "slide-9-openverse.jpg",
+                "mimeType": "image/jpeg",
+                "sourceType": "openverse_search",
+                "query": "research paper",
+                "attribution": "Research paper / Example / BY 4.0",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    asset = render_service._read_cached_visual_asset(
+        9,
+        tmp_path,
+        expected_query="enterprise AI agents responsible operations with human control",
+        image_type="thesis_concept",
+        purpose="Explain the final operating-system decision",
+        prompt="Premium enterprise visual",
+        provider_chain=["open_web_search", "Pollinations FLUX API"],
+    )
+
+    assert asset is None
+
+
 def test_openverse_ranking_prefers_specific_non_textual_metadata() -> None:
     specific = {
         "title": "Electric vehicle factory production line",
@@ -811,6 +969,27 @@ def test_premium_statement_ends_on_a_complete_claim() -> None:
     assert statement == "下一阶段优势不只取决于做大规模，更取决于能否落实"
 
 
+def test_card_frame_grows_before_complete_two_line_copy_is_clipped() -> None:
+    content = (
+        "Scale only when three lines pass together: repeatable business value, "
+        "sustained adoption, and risk plus reliability within threshold"
+    )
+
+    fitted, _x, _y, _cx, fitted_cy, fitted_size, _anchor = render_service._fit_text_frame(
+        content,
+        780000,
+        1800000,
+        8500000,
+        800000,
+        render_service.PPT_CARD_MIN,
+        "card",
+    )
+
+    assert fitted == content
+    assert fitted_cy > 800000
+    assert fitted_size == render_service.PPT_CARD_MIN
+
+
 def test_premium_statement_collapses_nested_quote_into_complete_claim() -> None:
     statement = render_service._premium_statement_copy(
         "下一阶段优势不只取决于做大规模，更取决于能否落实‘企业需要从规模扩张切换到可持续利润’"
@@ -877,6 +1056,42 @@ def test_ppt_render_compacts_and_deduplicates_visible_body_blocks() -> None:
     ]
     assert all(slide.title not in item for item in visible)
     assert len(visible) == len(set(visible))
+
+
+def test_system_map_keeps_center_claim_and_all_four_stage_nodes() -> None:
+    slide = SimpleNamespace(
+        title="ROI chain: use → process → outcome → value",
+        subtitle="",
+        design_plan=SimpleNamespace(composition_archetype="system_map"),
+        blocks=[
+            SimpleNamespace(block_type="body", content="Attribute ROI across the full chain"),
+            SimpleNamespace(block_type="card", content="Use: adoption and retention"),
+            SimpleNamespace(block_type="card", content="Process: cycle time and quality"),
+            SimpleNamespace(block_type="card", content="Outcome: conversion and risk loss"),
+            SimpleNamespace(block_type="body", content="Value: outcome minus fully loaded cost"),
+        ],
+    )
+
+    blocks = render_service._content_blocks(
+        slide,
+        deck_title="Enterprise AI Agent Adoption 2026",
+        max_blocks=render_service._render_block_limit(slide),
+    )
+
+    assert len(blocks) == 5
+    assert blocks[-1].content == "Value: outcome minus fully loaded cost"
+
+
+def test_page_number_moves_clear_of_a_bottom_right_visual_asset() -> None:
+    slide = SimpleNamespace(
+        slide_index=8,
+        design_plan=SimpleNamespace(composition_archetype="priority_stack"),
+    )
+
+    xml = render_service._page_number_shape(slide, 9, "6F8192")
+
+    assert 'x="8560000"' in xml
+    assert "8/9" in xml
 
 
 def test_ppt_explainer_layer_keeps_diagram_labels_out_of_visible_text() -> None:
@@ -965,6 +1180,7 @@ def test_ai_visual_generation_uses_retry_budget_for_free_image_providers(tmp_pat
 
     assert asset is not None
     assert asset.source_type == "free_ai_fallback"
+
     assert asset.path.exists()
     assert captured["request"].timeout_seconds >= 90
     assert captured["request"].max_attempts == 2
@@ -992,6 +1208,44 @@ def test_ai_visual_generation_uses_retry_budget_for_free_image_providers(tmp_pat
 
     assert asset is not None
     assert asset.source_type == "free_ai_fallback"
+
+
+def test_ai_visual_uniqueness_hint_is_at_prompt_start(tmp_path) -> None:
+    captured = {}
+
+    class CapturingImageGateway:
+        def generate(self, request):
+            captured["request"] = request
+            return GeneratedImage(
+                bytes=b"\xff\xd8\xff\xe0unique-image",
+                mime_type="image/jpeg",
+                width=request.width,
+                height=request.height,
+                model="pollinations-free:pollinations:flux",
+            )
+
+    asset = render_service._generate_visual_asset_with_ai(
+        8,
+        "enterprise AI agents scale only after value adoption and risk gates",
+        tmp_path,
+        CapturingImageGateway(),
+        image_type="business_scene",
+        purpose="Serves context content by visualizing the slide claim",
+        image_prompt="premium enterprise decision visual",
+        provider_chain=["Pollinations FLUX API"],
+        slide_title="Scale only after value, adoption, and risk gates",
+        slide_intent="Explain the go-or-no-go decision",
+        asset_role="hero",
+        image_treatment="masked_window",
+        composition_archetype="priority_stack",
+        direction_name="Executive Editorial",
+        palette=["#10151B", "#E8DCC8"],
+        variation_hint="Unique visual alternative 2 for slide 8",
+    )
+
+    assert asset is not None
+    assert captured["request"].prompt.startswith("Unique visual alternative 2 for slide 8")
+    assert asset.path.exists()
 
 
 def test_visual_asset_resolution_retries_until_replacement_is_unique(tmp_path) -> None:
