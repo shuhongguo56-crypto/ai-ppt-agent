@@ -12,7 +12,7 @@
 - PowerPoint 16.0 opened the final PPTX without repair, recognized all nine slides as a 16:9 presentation, and exported nine 1920x1080 slideshow PNGs.
 - Artifact inspection confirmed nine unique embedded media hashes, SimSun for East Asian text, Times New Roman for Latin text, matching titles across PPTX/HTML, no replacement characters, no terminal ellipses, fullscreen controls, keyboard navigation, and HyperFrames motion markers.
 - Final regression: 391 Python tests passed; TypeScript typecheck and Next.js production build passed; `git diff --check` passed.
-- Customer delivery package: `D:\Codex\Outputs\humanizeppt-enterprise-research-final-20260719-202200`.
+- Customer delivery package: `D:\Codex\Outputs\humanizeppt-enterprise-research-delivery-final-20260719`.
 - Stable public entry: `https://shuhongguo56-crypto.github.io/ai-ppt-agent/live/`; the active free backend origin is maintained by `scripts/public-runtime.ps1` and recorded under `D:\Codex\Workspaces\ai-ppt-public-runtime`.
 
 ## 2026-07-19 expert-kernel upgrade
