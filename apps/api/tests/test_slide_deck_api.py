@@ -1,4 +1,5 @@
 import re
+from copy import deepcopy
 
 from ai_ppt_contracts import OutlineDecision, SlideDeck
 from app.services.slide_deck import (
@@ -261,7 +262,10 @@ def test_assemble_slide_deck_from_confirmed_outline_and_visual_direction(client)
     variants = [plan["compositionVariant"] for plan in plans]
     signatures = set(zip(archetypes, treatments, variants))
     assert all(left != right for left, right in zip(archetypes, archetypes[1:]))
-    assert len(set(archetypes)) >= 3
+    # Research mode reserves an actual composition family per page; this is
+    # stronger than metadata-only variants and keeps the PPTX renderer from
+    # silently returning to a repeated left-copy/right-image pattern.
+    assert len(set(archetypes)) == len(plans)
     assert len(set(treatments)) >= 2
     assert len(signatures) == len(plans)
     assert {variant.split("-", 1)[0] for variant in variants} == {
@@ -294,6 +298,50 @@ def test_assemble_slide_deck_from_confirmed_outline_and_visual_direction(client)
                 "split_comparison",
             }
             assert plan["assetRole"] == "diagram"
+
+
+def test_research_deck_reserves_unique_compositions_for_a_long_repeated_section(client) -> None:
+    """A long evidence/insight chapter must not relapse into one card layout."""
+
+    create_project(client)
+    generated = client.post("/api/projects/project-deck/outline/generate", json={})
+    assert generated.status_code == 200
+    outline = generated.json()["outlineDecision"]
+    template = next(slide for slide in outline["slides"] if slide["purpose"] == "insight")
+    for index in range(9, 15):
+        extra = deepcopy(template)
+        extra["title"] = f"研究洞察 {index}"
+        extra["keyPoint"] = f"第 {index} 个研究洞察需要采用独立构图来呈现。"
+        extra["talkingPoints"] = [
+            f"洞察 {index} 的来源与判断边界",
+            f"洞察 {index} 对后续行动的影响",
+        ]
+        extra["purpose"] = "insight"
+        outline["slides"].insert(-1, extra)
+    for slide_index, slide in enumerate(outline["slides"], start=1):
+        slide["slideIndex"] = slide_index
+    outline["targetSlideCount"] = len(outline["slides"])
+    for slide in outline["slides"][1:-1]:
+        slide["purpose"] = "insight"
+
+    patched = client.patch(
+        "/api/projects/project-deck/outline",
+        json={"expectedVersion": generated.json()["version"], "outlineDecision": outline},
+    )
+    assert patched.status_code == 200
+    confirmed = client.post(
+        "/api/projects/project-deck/outline/confirm",
+        json={"outlineDecisionVersion": patched.json()["version"]},
+    )
+    assert confirmed.status_code == 200
+    visual = select_visual(client, confirmed.json()["version"])
+    assembled = assemble_deck(client, visual["version"])
+
+    assert assembled.status_code == 200
+    plans = [slide["designPlan"] for slide in assembled.json()["slideDeck"]["slides"]]
+    archetypes = [plan["compositionArchetype"] for plan in plans]
+    assert len(archetypes) == 14
+    assert len(set(archetypes)) == len(archetypes)
 
 
 def test_assembled_deck_uses_edited_outline(client) -> None:

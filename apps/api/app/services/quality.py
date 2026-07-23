@@ -8,6 +8,7 @@ import zipfile
 from pathlib import Path
 
 from ai_ppt_contracts import QualityReport, RenderResult, SlideDeck
+from app.services.composition_library import COMPOSITION_LIBRARY
 from app.services.image_quality import raster_dimensions
 
 
@@ -244,7 +245,11 @@ def check_render_quality(
                 ),
             }
         )
-        placement = _pptx_visual_placement_diversity(pptx_path, expected_slide_count)
+        placement = _pptx_visual_placement_diversity(
+            pptx_path,
+            expected_slide_count,
+            competition_grade=quality_profile in {"enterprise_ppt", "competition_ppt"},
+        )
         checks.append(
             {
                 "schemaVersion": "1.0.0",
@@ -401,7 +406,11 @@ def check_render_quality(
         reference_style_marker = _html_has_reference_style_marker(html_path)
         page_plan_count = _html_page_plan_marker_count(html_path)
         image_agent_count = _html_image_agent_marker_count(html_path)
-        composition_diversity = _html_composition_diversity(html_path, expected_slide_count)
+        composition_diversity = _html_composition_diversity(
+            html_path,
+            expected_slide_count,
+            competition_grade=quality_profile in {"enterprise_ppt", "competition_ppt"},
+        )
         explainer_metrics = _html_explainer_metrics(html_path, expected_slide_count)
         checks.append(
             {
@@ -1126,10 +1135,21 @@ def _competition_visual_variety_check(slide_deck: SlideDeck) -> dict[str, str]:
     ]
     rhythms = [slide.design_plan.composition_variant.split("-", 1)[0] for slide in slide_deck.slides]
     slide_count = len(slide_deck.slides)
-    required_archetypes = 5 if slide_count >= 8 else 4 if slide_count >= 6 else min(3, slide_count)
+    # A competition deck is not allowed to "look varied" merely because a
+    # small subset of pages differs.  While the native library has unused
+    # families, every page must claim a distinct structural composition.  For
+    # decks longer than the library, the renderer still requires broad variety
+    # and distinct variant signatures, but repeating a family becomes
+    # unavoidable and is handled by content-driven variants.
+    exhaustive_family_run = slide_count <= len(COMPOSITION_LIBRARY)
+    required_archetypes = (
+        slide_count
+        if exhaustive_family_run
+        else min(len(COMPOSITION_LIBRARY), max(8, round(slide_count * 0.75)))
+    )
     required_treatments = 3 if slide_count >= 6 else min(2, slide_count)
     required_motions = 3 if slide_count >= 6 else min(2, slide_count)
-    required_signatures = max(1, round(slide_count * 0.85))
+    required_signatures = slide_count
     required_rhythms = 3 if slide_count >= 6 else min(2, slide_count)
     no_adjacent_repeats = all(left != right for left, right in zip(archetypes, archetypes[1:]))
     passed = (
@@ -1145,7 +1165,7 @@ def _competition_visual_variety_check(slide_deck: SlideDeck) -> dict[str, str]:
         "name": "competition_visual_variety",
         "status": "passed" if passed else "failed",
         "detail": (
-            f"Deck uses {len(set(archetypes))} composition archetypes, {len(set(signatures))} unique page signatures, {len(set(rhythms))} page rhythms, {len(set(treatments))} image treatments, and {len(set(motions))} motion presets."
+            f"Deck uses {len(set(archetypes))} composition archetypes, {len(set(signatures))} unique page signatures, {len(set(rhythms))} page rhythms, {len(set(treatments))} image treatments, and {len(set(motions))} motion presets; every page has a distinct composition family while the library has capacity."
             if passed
             else (
                 f"Visual system lacks competition-level variety: archetypes {len(set(archetypes))}/{required_archetypes}, "
@@ -1296,12 +1316,21 @@ def _html_image_agent_marker_count(path: Path) -> int:
     return len(re.findall(r'data-image-plan-type="[^"]+"[^>]+data-image-plan-purpose="[^"]+"', html))
 
 
-def _html_composition_diversity(path: Path, slide_count: int) -> dict[str, object]:
+def _html_composition_diversity(
+    path: Path,
+    slide_count: int,
+    *,
+    competition_grade: bool = False,
+) -> dict[str, object]:
     html = path.read_text(encoding="utf-8")
     archetypes = re.findall(r'data-composition-archetype="([^"]+)"', html)
     treatments = re.findall(r'data-image-treatment="([^"]+)"', html)
     no_adjacent_repeats = all(left != right for left, right in zip(archetypes, archetypes[1:]))
-    required_archetypes = 3 if slide_count >= 6 else min(slide_count, 2)
+    required_archetypes = (
+        min(slide_count, len(COMPOSITION_LIBRARY))
+        if competition_grade
+        else 3 if slide_count >= 6 else min(slide_count, 2)
+    )
     required_treatments = 2 if slide_count >= 3 else 1
     passed = (
         len(archetypes) == slide_count
@@ -1315,7 +1344,8 @@ def _html_composition_diversity(path: Path, slide_count: int) -> dict[str, objec
         "detail": (
             f"HTML uses {len(set(archetypes))} composition archetypes and "
             f"{len(set(treatments))} image treatments across {slide_count} slides; "
-            f"adjacent archetypes are {'distinct' if no_adjacent_repeats else 'repeated'}."
+            f"adjacent archetypes are {'distinct' if no_adjacent_repeats else 'repeated'}; "
+            f"required structural families={required_archetypes}."
         ),
     }
 
@@ -1444,8 +1474,13 @@ def _pptx_media_count(path: Path) -> int:
         return sum(1 for name in archive.namelist() if name.startswith("ppt/media/"))
 
 
-def _pptx_visual_placement_diversity(path: Path, expected_slide_count: int) -> dict[str, object]:
-    placements: set[tuple[int, int, int, int]] = set()
+def _pptx_visual_placement_diversity(
+    path: Path,
+    expected_slide_count: int,
+    *,
+    competition_grade: bool = False,
+) -> dict[str, object]:
+    placements: set[tuple[str, int, int, int, int]] = set()
     located = 0
     with zipfile.ZipFile(path) as archive:
         for name in archive.namelist():
@@ -1461,10 +1496,20 @@ def _pptx_visual_placement_diversity(path: Path, expected_slide_count: int) -> d
                 )
                 if geometry is None:
                     continue
-                placements.add(tuple(int(value) for value in geometry.groups()))
+                name_match = re.search(r'<p:cNvPr id="\d+" name="([^"]+)"', picture)
+                visual_name = name_match.group(1) if name_match else "unnamed visual"
+                # Full-bleed pages intentionally share a 16:9 canvas, so the
+                # semantic visual gravity is part of the real placement
+                # signature.  It is emitted by the native renderer and maps to
+                # a different protected reading zone and content layout.
+                placements.add((visual_name, *(int(value) for value in geometry.groups())))
                 located += 1
                 break
-    required = min(expected_slide_count, 6)
+    required = (
+        min(expected_slide_count, len(COMPOSITION_LIBRARY))
+        if competition_grade
+        else min(expected_slide_count, 6)
+    )
     issues: list[str] = []
     if located < expected_slide_count:
         issues.append(f"only {located}/{expected_slide_count} slides expose a visual placement")

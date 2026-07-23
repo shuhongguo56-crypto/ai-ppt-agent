@@ -4,19 +4,43 @@ import hashlib
 import re
 
 from ai_ppt_contracts import OutlineDecision, SlideDeck, VisualDirectionDecision
-from app.services.composition_library import visual_placement
+from app.services.composition_library import COMPOSITION_LIBRARY, visual_placement
 from app.services.image_agent import build_image_plan
 
 
 _PURPOSE_ARCHETYPES: dict[str, tuple[str, ...]] = {
     "cover": ("cinematic_hero", "editorial_cover", "architectural_cover"),
     "agenda": ("chapter_index", "process_ribbon", "editorial_split"),
-    "context": ("editorial_split", "diagonal_story", "proof_mosaic"),
+    # Keep proof_mosaic reserved for an evidence page whenever possible.  A
+    # context page can make its point with an editorial or architectural
+    # composition, whereas a qualitative evidence page needs proof_mosaic to
+    # avoid inventing a data-chart treatment.
+    "context": ("editorial_split", "diagonal_story", "architectural_cover"),
     "insight": ("statement_focus", "editorial_split", "diagonal_story"),
     "evidence": ("data_landscape", "proof_mosaic", "split_comparison"),
     "framework": ("system_map", "process_ribbon", "split_comparison"),
     "recommendation": ("priority_stack", "process_ribbon", "statement_focus"),
     "conclusion": ("closing_echo", "manifesto_close", "future_horizon"),
+}
+
+# The primary set above gives each narrative role its most natural visual
+# language.  This secondary set is only consulted once a primary composition
+# has already been used in the same deck.  It prevents a long research deck
+# from quietly falling back to the same "copy plus image" page just because it
+# contains several evidence, insight, or recommendation pages.
+#
+# These are deliberately composition families, not decorative skins: every
+# candidate has a different image gravity and a different native-PPT shape
+# renderer.  The output therefore changes in both PPTX and HyperFrames.
+_PURPOSE_UNIQUE_FALLBACKS: dict[str, tuple[str, ...]] = {
+    "cover": ("statement_focus", "diagonal_story", "editorial_split"),
+    "agenda": ("system_map", "proof_mosaic", "split_comparison"),
+    "context": ("architectural_cover", "statement_focus", "system_map"),
+    "insight": ("proof_mosaic", "editorial_cover", "priority_stack"),
+    "evidence": ("system_map", "priority_stack", "diagonal_story"),
+    "framework": ("proof_mosaic", "priority_stack", "editorial_split"),
+    "recommendation": ("statement_focus", "split_comparison", "data_landscape"),
+    "conclusion": ("editorial_cover", "statement_focus", "diagonal_story"),
 }
 
 _ARCHETYPE_TREATMENTS: dict[str, tuple[str, ...]] = {
@@ -836,9 +860,21 @@ def _plan_slide_design(
     )
     pool = _PURPOSE_ARCHETYPES[str(slide.purpose)]
     preferred = _content_led_archetype(slide, content)
+    # For normal (up-to-16-page) customer decks we reserve a different
+    # structural family for every page.  The deck is still content-led because
+    # each role starts from its primary pool; the fallback is only used to keep
+    # a repeated role from repeating its visual composition.
+    unique_candidates = _unused_composition_candidates(
+        purpose=str(slide.purpose),
+        primary_pool=pool,
+        preferred=preferred,
+        used_archetypes=used_archetypes,
+        slide_count=slide_count,
+    )
+    candidate_pool = unique_candidates or list(pool)
     rhythm = _page_rhythm(slide.slide_index, slide_count)
     archetype = max(
-        pool,
+        candidate_pool,
         key=lambda item: _archetype_score(
             item,
             preferred=preferred,
@@ -889,6 +925,74 @@ def _plan_slide_design(
     }
 
 
+def _unused_composition_candidates(
+    *,
+    purpose: str,
+    primary_pool: tuple[str, ...],
+    preferred: str | None,
+    used_archetypes: dict[str, int],
+    slide_count: int,
+) -> list[str]:
+    """Return unused, role-appropriate composition families when available.
+
+    Sixteen native composition families are available.  Reserving them for
+    decks at or below that size gives the research/enterprise product an
+    enforceable page-by-page layout difference without making a 17+ page deck
+    invalid merely because it must eventually reuse a family.
+    """
+
+    if slide_count > len(COMPOSITION_LIBRARY):
+        return []
+    # Semantic signals outrank variety.  A qualitative evidence page must use
+    # the proof layout before it is considered for a quantitative chart layout;
+    # uniqueness then selects the next compatible family if that proof layout
+    # is already occupied elsewhere in the deck.
+    primary_ordered = (
+        *((preferred,) if preferred and preferred in primary_pool else ()),
+        *(item for item in primary_pool if item != preferred),
+    )
+    if purpose == "evidence" and preferred == "proof_mosaic":
+        # Qualitative evidence must never degrade into data_landscape on a
+        # later uniqueness pass.  If proof_mosaic is already occupied, the
+        # role-specific fallback below supplies another non-chart composition.
+        primary_ordered = ("proof_mosaic",)
+    primary_unused = [
+        item for item in primary_ordered if used_archetypes.get(item, 0) == 0
+    ]
+    # Preserve semantic ownership before optimisation.  For example, an agenda
+    # must not consume proof_mosaic simply because that shape happens to score
+    # well for the current visual rhythm; proof_mosaic is the honest first
+    # choice for a later qualitative evidence page.
+    if primary_unused:
+        return primary_unused
+
+    role_fallbacks = tuple(
+        item
+        for item in _PURPOSE_UNIQUE_FALLBACKS[purpose]
+        if item != preferred and item not in primary_pool
+    )
+    # A long run of one narrative role (for example, a research evidence
+    # section) can legitimately exceed its first six compatible families.  Do
+    # not then repeat a cheap card grid: consume the remaining native families
+    # in a calm, globally ordered reserve.  This reserve is reached only after
+    # the role-specific options above, so it protects information semantics.
+    global_reserve = tuple(
+        item
+        for item in COMPOSITION_LIBRARY
+        if item not in primary_pool and item not in role_fallbacks and item != preferred
+    )
+    fallback_ordered = (
+        *((preferred,) if preferred and preferred not in primary_pool else ()),
+        *role_fallbacks,
+        *global_reserve,
+    )
+    return [
+        item
+        for item in fallback_ordered
+        if used_archetypes.get(item, 0) == 0
+    ]
+
+
 def _page_rhythm(slide_index: int, slide_count: int) -> str:
     if slide_index == 1:
         return "anchor"
@@ -929,6 +1033,25 @@ def _content_led_archetype(slide, content: str) -> str | None:
     lowered = content.lower()
     comparison = (" vs ", "versus", "compare", "comparison", "对比", "比较", "差异", "区别")
     sequence = ("first", "second", "then", "finally", "step", "phase", "首先", "其次", "然后", "阶段", "步骤", "流程")
+    # Never turn a source that explicitly says it lacks numerical evidence into
+    # a decorative bar chart merely because a year or a generic "improve" word
+    # appears elsewhere in the source context.  A proof mosaic is a more honest
+    # competition-style treatment for qualitative research.
+    qualitative_evidence_markers = (
+        "non-quantitative",
+        "qualitative evidence",
+        "without numerical",
+        "no numerical",
+        "not quantitative",
+        "没有提供",
+        "没有数值",
+        "无量化",
+        "定性证据",
+        "数量指标",
+        "不可画成柱状图",
+    )
+    if slide.purpose == "evidence" and any(marker in lowered for marker in qualitative_evidence_markers):
+        return "proof_mosaic"
     numeric = _has_quantitative_signal(content)
     if any(marker in lowered for marker in comparison):
         return "split_comparison"

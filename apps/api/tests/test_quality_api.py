@@ -332,6 +332,54 @@ def test_visual_asset_uniqueness_accepts_page_specific_binaries(tmp_path) -> Non
     assert result == {"passed": True, "unique": 2, "issues": []}
 
 
+def test_competition_pptx_gate_rejects_repeated_visual_placement(tmp_path) -> None:
+    """Research mode must reject a deck that repeats the same picture geometry."""
+
+    pptx_path = tmp_path / "repeated-placement.pptx"
+    picture = (
+        '<p:pic><p:nvPicPr><p:cNvPr id="201" name="Content Visual right-hero"/>'
+        '</p:nvPicPr><p:spPr><a:xfrm><a:off x="7280000" y="650000"/>'
+        '<a:ext cx="4250000" cy="5100000"/></a:xfrm></p:spPr></p:pic>'
+    )
+    with zipfile.ZipFile(pptx_path, "w") as archive:
+        for slide_index in range(1, 9):
+            archive.writestr(
+                f"ppt/slides/slide{slide_index}.xml",
+                f'<p:sld xmlns:p="p" xmlns:a="a">{picture}</p:sld>',
+            )
+
+    result = quality_service._pptx_visual_placement_diversity(
+        pptx_path,
+        8,
+        competition_grade=True,
+    )
+
+    assert result["passed"] is False
+    assert result["unique"] == 1
+    assert "1 unique placements; expected at least 8" in result["issues"]
+
+
+def test_competition_html_gate_rejects_repeated_composition_family(tmp_path) -> None:
+    html_path = tmp_path / "repeated-composition.html"
+    html_path.write_text(
+        "".join(
+            '<section data-composition-archetype="cinematic_hero" '
+            'data-image-treatment="full_bleed"></section>'
+            for _ in range(8)
+        ),
+        encoding="utf-8",
+    )
+
+    result = quality_service._html_composition_diversity(
+        html_path,
+        8,
+        competition_grade=True,
+    )
+
+    assert result["passed"] is False
+    assert "required structural families=8" in result["detail"]
+
+
 def test_quality_rejects_pptx_foreground_shapes_outside_safe_bounds(client) -> None:
     rendered = render_project(client)
     pptx_artifact = next(
