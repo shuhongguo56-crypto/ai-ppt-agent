@@ -30,6 +30,7 @@ ENTERPRISE_PPT_BASELINE_CHECKS = {
     "visual_asset_license_readiness",
     "visual_asset_uniqueness",
     "pptx_visual_placement_diversity",
+    "pptx_layout_structure_diversity",
     "pptx_page_plan_markers",
     "pptx_image_agent_plan_markers",
     "pptx_explainer_layers",
@@ -260,6 +261,26 @@ def check_render_quality(
                     if placement["passed"]
                     else "PPTX image placement is still too repetitive: "
                     + ", ".join(placement["issues"][:6])
+                    + "."
+                ),
+            }
+        )
+        layout_structure = _pptx_layout_structure_diversity(
+            pptx_path,
+            expected_slide_count,
+            competition_grade=quality_profile in {"enterprise_ppt", "competition_ppt"},
+        )
+        checks.append(
+            {
+                "schemaVersion": "1.0.0",
+                "name": "pptx_layout_structure_diversity",
+                "status": "passed" if layout_structure["passed"] else "failed",
+                "detail": (
+                    f"PPTX uses {layout_structure['unique']} distinct native page structures across "
+                    f"{expected_slide_count} slides."
+                    if layout_structure["passed"]
+                    else "PPTX page structure is still too repetitive: "
+                    + ", ".join(layout_structure["issues"][:6])
                     + "."
                 ),
             }
@@ -594,6 +615,7 @@ def _customer_delivery_readiness_check(checks: list[dict[str, str]]) -> dict[str
         "visual_asset_license_readiness",
         "visual_asset_uniqueness",
         "pptx_visual_placement_diversity",
+        "pptx_layout_structure_diversity",
         "pptx_font_family_contract",
         "pptx_foreground_bounds",
         "pptx_text_fit_estimate",
@@ -1520,6 +1542,110 @@ def _pptx_visual_placement_diversity(
         "unique": len(placements),
         "issues": issues,
     }
+
+
+def _pptx_layout_structure_diversity(
+    path: Path,
+    expected_slide_count: int,
+    *,
+    competition_grade: bool = False,
+) -> dict[str, object]:
+    """Check the rendered page geometry, not just image or metadata variety.
+
+    A deck can technically have different image files and different image crops while
+    still repeating the same copy/card grid on every page.  Customer-facing quality
+    requires the native PPTX shape geometry to change as the story changes.  The
+    signature deliberately ignores copy and invisible planning markers, so changing
+    wording or SlideDeck metadata cannot make a repeated layout appear distinct.
+    """
+
+    signatures: set[tuple[tuple[str, str, int, int, int, int], ...]] = set()
+    located = 0
+    slide_names: list[str] = []
+    with zipfile.ZipFile(path) as archive:
+        slide_names = sorted(
+            (
+                name
+                for name in archive.namelist()
+                if name.startswith("ppt/slides/slide") and name.endswith(".xml")
+            ),
+            key=lambda name: int(re.search(r"slide(\d+)\.xml$", name).group(1)),
+        )
+        for name in slide_names:
+            xml = archive.read(name).decode("utf-8", errors="ignore")
+            shapes: list[tuple[str, str, int, int, int, int]] = []
+            for shape in re.findall(r"<p:sp>.*?</p:sp>", xml, flags=re.DOTALL):
+                name_match = re.search(r'<p:cNvPr id="\d+" name="([^"]+)"', shape)
+                geometry = re.search(
+                    r'<a:off x="(-?\d+)" y="(-?\d+)"/><a:ext cx="(\d+)" cy="(\d+)"/>',
+                    shape,
+                )
+                if name_match is None or geometry is None:
+                    continue
+                shape_name = name_match.group(1)
+                if not _is_customer_visible_layout_shape(shape_name):
+                    continue
+                preset_match = re.search(r'<a:prstGeom prst="([^"]+)"', shape)
+                shape_kind = _layout_shape_kind(shape_name)
+                shapes.append(
+                    (
+                        shape_kind,
+                        preset_match.group(1) if preset_match else "text",
+                        *(int(value) for value in geometry.groups()),
+                    )
+                )
+            if shapes:
+                # Geometry and type define the visual grammar.  Sorting makes this
+                # robust to harmless XML ordering differences introduced by Office.
+                signatures.add(tuple(sorted(shapes)))
+                located += 1
+
+    required = (
+        min(expected_slide_count, len(COMPOSITION_LIBRARY))
+        if competition_grade
+        else min(expected_slide_count, 6)
+    )
+    issues: list[str] = []
+    if located < expected_slide_count:
+        issues.append(f"only {located}/{expected_slide_count} slides expose visible layout geometry")
+    if len(signatures) < required:
+        issues.append(f"{len(signatures)} unique page structures; expected at least {required}")
+    return {
+        "passed": located >= expected_slide_count and len(signatures) >= required,
+        "unique": len(signatures),
+        "issues": issues,
+    }
+
+
+def _is_customer_visible_layout_shape(shape_name: str) -> bool:
+    """Return whether a native shape contributes to the visible composition."""
+
+    prefixes = (
+        "Text ",
+        "Card ",
+        "Design Shape ",
+        "Shape ",
+        "Agenda ",
+        "Framework ",
+        "Evidence ",
+        "Insight ",
+        "Closing ",
+    )
+    return shape_name.startswith(prefixes)
+
+
+def _layout_shape_kind(shape_name: str) -> str:
+    """Normalize generated IDs while retaining the visible element category."""
+
+    for prefix, kind in (
+        ("Text ", "text"),
+        ("Card ", "card"),
+        ("Design Shape ", "design"),
+        ("Shape ", "shape"),
+    ):
+        if shape_name.startswith(prefix):
+            return kind
+    return re.sub(r"\s+\d+$", "", shape_name).casefold()
 
 
 def _pptx_page_plan_marker_count(path: Path) -> int:

@@ -130,6 +130,7 @@ def test_quality_check_passes_for_rendered_artifacts(client) -> None:
         "visual_asset_license_readiness",
         "visual_asset_uniqueness",
         "pptx_visual_placement_diversity",
+        "pptx_layout_structure_diversity",
         "pptx_page_plan_markers",
         "pptx_image_agent_plan_markers",
         "pptx_explainer_layers",
@@ -357,6 +358,40 @@ def test_competition_pptx_gate_rejects_repeated_visual_placement(tmp_path) -> No
     assert result["passed"] is False
     assert result["unique"] == 1
     assert "1 unique placements; expected at least 8" in result["issues"]
+
+
+def test_competition_pptx_gate_rejects_repeated_page_structure(tmp_path) -> None:
+    """Swapping images must not disguise a repeated text/card layout."""
+
+    pptx_path = tmp_path / "repeated-structure.pptx"
+    text_shape = (
+        '<p:sp><p:nvSpPr><p:cNvPr id="5" name="Text 5"/></p:nvSpPr>'
+        '<p:spPr><a:xfrm><a:off x="720000" y="480000"/>'
+        '<a:ext cx="6200000" cy="920000"/></a:xfrm>'
+        '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:sp>'
+    )
+    card_shape = (
+        '<p:sp><p:nvSpPr><p:cNvPr id="6" name="Card 6"/></p:nvSpPr>'
+        '<p:spPr><a:xfrm><a:off x="720000" y="1900000"/>'
+        '<a:ext cx="3200000" cy="1100000"/></a:xfrm>'
+        '<a:prstGeom prst="roundRect"><a:avLst/></a:prstGeom></p:spPr></p:sp>'
+    )
+    with zipfile.ZipFile(pptx_path, "w") as archive:
+        for slide_index in range(1, 9):
+            archive.writestr(
+                f"ppt/slides/slide{slide_index}.xml",
+                f'<p:sld xmlns:p="p" xmlns:a="a">{text_shape}{card_shape}</p:sld>',
+            )
+
+    result = quality_service._pptx_layout_structure_diversity(
+        pptx_path,
+        8,
+        competition_grade=True,
+    )
+
+    assert result["passed"] is False
+    assert result["unique"] == 1
+    assert "1 unique page structures; expected at least 8" in result["issues"]
 
 
 def test_competition_html_gate_rejects_repeated_composition_family(tmp_path) -> None:
