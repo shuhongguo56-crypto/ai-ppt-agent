@@ -60,6 +60,42 @@ def test_text_shape_fits_long_copy_inside_tighter_safe_area() -> None:
     assert "<a:normAutofit" in xml
 
 
+def test_extended_native_layout_library_has_distinct_rendered_shape_grammar() -> None:
+    """Long decks must get real PPTX structures, not metadata-only variants."""
+
+    blocks = [
+        SimpleNamespace(content="A complete decision claim with a source-backed implication."),
+        SimpleNamespace(content="The first supporting point remains editable."),
+        SimpleNamespace(content="The second supporting point changes the decision."),
+        SimpleNamespace(content="The third supporting point closes the loop."),
+    ]
+    rendered: list[str] = []
+    for archetype in (
+        "gallery_strip",
+        "vertical_story",
+        "spotlight_quote",
+        "evidence_matrix",
+        "orbit_system",
+        "step_ladder",
+        "bridge_narrative",
+        "closing_bloom",
+    ):
+        slide = SimpleNamespace(
+            title=f"{archetype} decision page",
+            subtitle="A source-grounded subtitle",
+            speaker_notes="Speaker notes",
+            visual_intent="A relevant visual",
+            purpose="insight",
+            design_plan=SimpleNamespace(composition_archetype=archetype),
+        )
+        rendered.append(render_service._layout_shapes(slide, blocks, "10211E", "1F67D2", "F4F0E8"))
+
+    assert len(rendered) == 8
+    assert len(set(rendered)) == len(rendered)
+    assert all("<p:sp>" in shape_xml for shape_xml in rendered)
+    assert all("Customer Delivery" not in shape_xml for shape_xml in rendered)
+
+
 def test_text_shape_does_not_clip_before_layout_fit_when_space_allows() -> None:
     text = "瑞幸复兴的本质是信任修复、产品爆点、数字化复购与供应链复制形成增长飞轮"
 

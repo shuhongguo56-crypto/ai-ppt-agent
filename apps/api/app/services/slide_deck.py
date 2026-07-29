@@ -33,14 +33,14 @@ _PURPOSE_ARCHETYPES: dict[str, tuple[str, ...]] = {
 # candidate has a different image gravity and a different native-PPT shape
 # renderer.  The output therefore changes in both PPTX and HyperFrames.
 _PURPOSE_UNIQUE_FALLBACKS: dict[str, tuple[str, ...]] = {
-    "cover": ("statement_focus", "diagonal_story", "editorial_split"),
-    "agenda": ("system_map", "proof_mosaic", "split_comparison"),
-    "context": ("architectural_cover", "statement_focus", "system_map"),
-    "insight": ("proof_mosaic", "editorial_cover", "priority_stack"),
-    "evidence": ("system_map", "priority_stack", "diagonal_story"),
-    "framework": ("proof_mosaic", "priority_stack", "editorial_split"),
-    "recommendation": ("statement_focus", "split_comparison", "data_landscape"),
-    "conclusion": ("editorial_cover", "statement_focus", "diagonal_story"),
+    "cover": ("statement_focus", "diagonal_story", "bridge_narrative", "gallery_strip"),
+    "agenda": ("system_map", "proof_mosaic", "split_comparison", "gallery_strip"),
+    "context": ("architectural_cover", "vertical_story", "bridge_narrative", "statement_focus", "system_map"),
+    "insight": ("spotlight_quote", "proof_mosaic", "editorial_cover", "priority_stack"),
+    "evidence": ("evidence_matrix", "system_map", "priority_stack", "diagonal_story"),
+    "framework": ("orbit_system", "step_ladder", "proof_mosaic", "priority_stack", "editorial_split"),
+    "recommendation": ("step_ladder", "bridge_narrative", "statement_focus", "split_comparison", "data_landscape"),
+    "conclusion": ("closing_bloom", "editorial_cover", "spotlight_quote", "statement_focus", "diagonal_story"),
 }
 
 _ARCHETYPE_TREATMENTS: dict[str, tuple[str, ...]] = {
@@ -57,6 +57,14 @@ _ARCHETYPE_TREATMENTS: dict[str, tuple[str, ...]] = {
     "system_map": ("masked_window", "layered_cutout"),
     "split_comparison": ("split_crop", "evidence_strip"),
     "priority_stack": ("layered_cutout", "masked_window"),
+    "gallery_strip": ("evidence_strip", "masked_window"),
+    "vertical_story": ("full_bleed", "layered_cutout"),
+    "spotlight_quote": ("masked_window", "atmospheric_backdrop"),
+    "evidence_matrix": ("evidence_strip", "layered_cutout"),
+    "orbit_system": ("masked_window", "layered_cutout"),
+    "step_ladder": ("split_crop", "evidence_strip"),
+    "bridge_narrative": ("split_crop", "masked_window"),
+    "closing_bloom": ("full_bleed", "atmospheric_backdrop"),
     "closing_echo": ("atmospheric_backdrop", "full_bleed"),
     "manifesto_close": ("full_bleed", "masked_window"),
     "future_horizon": ("full_bleed", "split_crop"),
@@ -76,6 +84,14 @@ _ARCHETYPE_MOTION: dict[str, str] = {
     "system_map": "diagram_orbit",
     "split_comparison": "evidence_reveal",
     "priority_stack": "sequence_build",
+    "gallery_strip": "sequence_build",
+    "vertical_story": "editorial_wipe",
+    "spotlight_quote": "cinematic_reveal",
+    "evidence_matrix": "evidence_reveal",
+    "orbit_system": "diagram_orbit",
+    "step_ladder": "sequence_build",
+    "bridge_narrative": "editorial_wipe",
+    "closing_bloom": "closing_resolve",
     "closing_echo": "closing_resolve",
     "manifesto_close": "closing_resolve",
     "future_horizon": "cinematic_reveal",
@@ -397,24 +413,7 @@ def repair_slide_deck_for_quality(
                 )
             ]
             if not candidates:
-                global_fallback = (
-                    "system_map",
-                    "editorial_split",
-                    "proof_mosaic",
-                    "data_landscape",
-                    "split_comparison",
-                    "priority_stack",
-                    "process_ribbon",
-                    "cinematic_hero",
-                    "editorial_cover",
-                    "architectural_cover",
-                    "chapter_index",
-                    "diagonal_story",
-                    "statement_focus",
-                    "closing_echo",
-                    "manifesto_close",
-                    "future_horizon",
-                )
+                global_fallback = tuple(COMPOSITION_LIBRARY)
                 candidates = [
                     item
                     for item in global_fallback
@@ -1011,9 +1010,9 @@ def _archetype_score(
     token: int,
 ) -> int:
     rhythm_fit = {
-        "anchor": {"cinematic_hero", "architectural_cover", "statement_focus", "diagonal_story", "priority_stack"},
-        "dense": {"chapter_index", "proof_mosaic", "data_landscape", "process_ribbon", "system_map", "split_comparison"},
-        "breathing": {"editorial_cover", "editorial_split", "statement_focus", "closing_echo", "manifesto_close", "future_horizon"},
+        "anchor": {"cinematic_hero", "architectural_cover", "statement_focus", "diagonal_story", "priority_stack", "bridge_narrative", "spotlight_quote"},
+        "dense": {"chapter_index", "proof_mosaic", "data_landscape", "process_ribbon", "system_map", "split_comparison", "evidence_matrix", "orbit_system", "step_ladder"},
+        "breathing": {"editorial_cover", "editorial_split", "statement_focus", "closing_echo", "manifesto_close", "future_horizon", "gallery_strip", "vertical_story", "closing_bloom"},
     }
     score = 24 if archetype == preferred else 0
     score += 12 if used_count == 0 else 3 if used_count == 1 else -10 * used_count
@@ -1106,9 +1105,9 @@ def _has_quantitative_signal(content: str) -> bool:
 def _asset_role(slide, archetype: str) -> str:
     if slide.purpose == "cover":
         return "hero"
-    if slide.purpose == "evidence" or archetype in {"data_landscape", "proof_mosaic", "split_comparison"}:
+    if slide.purpose == "evidence" or archetype in {"data_landscape", "proof_mosaic", "split_comparison", "evidence_matrix"}:
         return "evidence"
-    if slide.purpose == "framework" or archetype in {"system_map", "process_ribbon"}:
+    if slide.purpose == "framework" or archetype in {"system_map", "process_ribbon", "orbit_system", "step_ladder"}:
         return "diagram"
     if slide.purpose == "conclusion":
         return "metaphor"
@@ -1132,13 +1131,13 @@ def _hierarchy_for(archetype: str, density: str) -> list[str]:
         "source/evidence discipline",
         "action-ready implication",
     ]
-    if archetype in {"cinematic_hero", "editorial_cover", "architectural_cover"}:
+    if archetype in {"cinematic_hero", "editorial_cover", "architectural_cover", "gallery_strip", "vertical_story", "bridge_narrative"}:
         return ["title", "promise", "hero image", "context", *enterprise_base]
-    if archetype in {"data_landscape", "proof_mosaic", "split_comparison"}:
+    if archetype in {"data_landscape", "proof_mosaic", "split_comparison", "evidence_matrix"}:
         return ["conclusion", "visual evidence", "supporting detail", "source", *enterprise_base]
-    if archetype in {"process_ribbon", "system_map", "priority_stack", "chapter_index"}:
+    if archetype in {"process_ribbon", "system_map", "priority_stack", "chapter_index", "orbit_system", "step_ladder"}:
         return ["orientation", "structure", "sequence", "takeaway", *enterprise_base]
-    if archetype in {"closing_echo", "manifesto_close", "future_horizon"}:
+    if archetype in {"closing_echo", "manifesto_close", "future_horizon", "closing_bloom"}:
         return ["final claim", "memory image", "implication", *enterprise_base]
     return ["claim", "context image", "support", f"{density} detail", *enterprise_base]
 

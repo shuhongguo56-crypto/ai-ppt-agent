@@ -722,6 +722,7 @@ def _upgrade_visual_asset_for_expert_delivery(
             original_height=original_height,
         )
     key_page = slide.slide_index == 1 or slide.design_plan.composition_archetype in {
+        "closing_bloom",
         "manifesto_close",
         "future_horizon",
         "closing_echo",
@@ -3382,6 +3383,38 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
     }}
     .composition-split_comparison {{ --content-w: 92%; --content-left: 4%; --asset-inset: 39% 45% 34% 45%; --asset-radius: 999px; }}
     .composition-priority_stack {{ --content-w: 73%; --content-left: 0%; --asset-inset: 11% 4% 10% 79%; --asset-radius: 22px; }}
+    .composition-gallery_strip {{
+      --content-w: 90%; --content-left: 5%; --asset-inset: 5% 5% 67% 5%; --asset-radius: 20px;
+      --frame-overlay: linear-gradient(180deg, color-mix(in srgb, var(--bg) 20%, transparent) 0 25%, color-mix(in srgb, var(--bg) 94%, transparent) 46% 100%);
+    }}
+    .composition-vertical_story {{
+      --content-w: 61%; --content-left: 0%; --asset-inset: 0 0 0 70%; --asset-radius: 0;
+      --frame-overlay: linear-gradient(90deg, color-mix(in srgb, var(--bg) 96%, transparent) 0 58%, color-mix(in srgb, var(--bg) 30%, transparent) 78%, color-mix(in srgb, var(--bg) 12%, transparent));
+    }}
+    .composition-spotlight_quote {{
+      --content-w: 55%; --content-left: 2%; --asset-inset: 55% 5% 10% 59%; --asset-radius: 30px;
+      --frame-overlay: radial-gradient(circle at 28% 38%, color-mix(in srgb, var(--bg) 74%, transparent), color-mix(in srgb, var(--bg) 94%, transparent) 66%);
+    }}
+    .composition-evidence_matrix {{
+      --content-w: 57%; --content-left: 42%; --asset-inset: 25% 66% 16% 5%; --asset-radius: 24px;
+      --frame-overlay: linear-gradient(270deg, color-mix(in srgb, var(--bg) 95%, transparent) 0 50%, color-mix(in srgb, var(--bg) 34%, transparent) 75%, color-mix(in srgb, var(--bg) 14%, transparent));
+    }}
+    .composition-orbit_system {{
+      --content-w: 92%; --content-left: 4%; --asset-inset: 29% 37% 23% 37%; --asset-radius: 999px;
+      --frame-overlay: radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--bg) 24%, transparent), color-mix(in srgb, var(--bg) 90%, transparent) 43%, color-mix(in srgb, var(--bg) 97%, transparent));
+    }}
+    .composition-step_ladder {{
+      --content-w: 60%; --content-left: 36%; --asset-inset: 0 68% 0 0; --asset-radius: 0;
+      --frame-overlay: linear-gradient(270deg, color-mix(in srgb, var(--bg) 96%, transparent) 0 56%, color-mix(in srgb, var(--bg) 34%, transparent) 76%, color-mix(in srgb, var(--bg) 13%, transparent));
+    }}
+    .composition-bridge_narrative {{
+      --content-w: 56%; --content-left: 0%; --asset-inset: 7% 5% 58% 57%; --asset-radius: 26px;
+      --frame-overlay: linear-gradient(90deg, color-mix(in srgb, var(--bg) 96%, transparent) 0 49%, color-mix(in srgb, var(--bg) 33%, transparent) 70%, color-mix(in srgb, var(--bg) 12%, transparent));
+    }}
+    .composition-closing_bloom {{
+      --content-w: 78%; --content-left: 11%; --asset-inset: 0; --asset-radius: 0;
+      --frame-overlay: radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--bg) 57%, transparent), color-mix(in srgb, var(--bg) 91%, transparent));
+    }}
     .composition-closing_echo,
     .composition-manifesto_close,
     .composition-future_horizon {{
@@ -3401,6 +3434,24 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
     .composition-system_map .blocks {{ grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }}
     .composition-split_comparison .blocks {{ grid-template-columns: 1fr 1fr !important; gap: 26px !important; }}
     .composition-priority_stack .blocks {{ grid-template-columns: 1fr !important; }}
+    .composition-gallery_strip .frame-inner {{ padding-top: clamp(180px, 19vh, 260px) !important; }}
+    .composition-gallery_strip .blocks {{ grid-template-columns: repeat(3, minmax(0, 1fr)) !important; max-width: 100% !important; }}
+    .composition-vertical_story .blocks {{ grid-template-columns: 1fr !important; max-width: 61% !important; }}
+    .composition-spotlight_quote .frame-inner {{ display: grid !important; align-content: center !important; }}
+    .composition-spotlight_quote h1 {{ max-width: 56% !important; font-size: clamp(42px, 6vw, 76px) !important; }}
+    .composition-spotlight_quote .blocks {{ max-width: 54% !important; grid-template-columns: 1fr !important; }}
+    .composition-evidence_matrix .blocks {{ margin-left: auto !important; max-width: 56% !important; grid-template-columns: 1fr 1fr !important; }}
+    .composition-orbit_system .blocks {{ width: 94% !important; max-width: none !important; margin: 92px auto 0 !important; grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }}
+    .composition-orbit_system .block:nth-child(odd) {{ transform: translateX(-6%); }}
+    .composition-orbit_system .block:nth-child(even) {{ transform: translateX(6%); }}
+    .composition-step_ladder .blocks {{ margin-left: auto !important; max-width: 59% !important; grid-template-columns: 1fr !important; gap: 10px !important; }}
+    .composition-step_ladder .block:nth-child(2) {{ margin-left: 8% !important; }}
+    .composition-step_ladder .block:nth-child(3) {{ margin-left: 16% !important; }}
+    .composition-bridge_narrative .blocks {{ position: absolute !important; left: 5% !important; right: 5% !important; bottom: 8% !important; max-width: none !important; grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }}
+    .composition-closing_bloom .frame-inner {{ align-content: center !important; text-align: center !important; }}
+    .composition-closing_bloom .frame-inner > h1,
+    .composition-closing_bloom .frame-inner > h2,
+    .composition-closing_bloom .frame-inner > .blocks {{ margin-left: auto !important; margin-right: auto !important; }}
     .composition-closing_echo .frame-inner,
     .composition-manifesto_close .frame-inner,
     .composition-future_horizon .frame-inner {{ align-content: center !important; text-align: center !important; }}
@@ -4015,6 +4066,7 @@ def _slide_visual_palette(palette: list[str], slide) -> tuple[str, str, str, str
         "editorial_cover",
         "architectural_cover",
         "statement_focus",
+        "closing_bloom",
         "manifesto_close",
         "future_horizon",
         "closing_echo",
@@ -4129,28 +4181,35 @@ def _page_backdrop_ornaments(slide, accent: str, soft: str, red: str, blue: str)
                 _shape(206, "ellipse", 9300000, 520000, 1480000, 1480000, blue, alpha=16000),
             ]
         )
-    if archetype in {"chapter_index", "priority_stack"}:
+    if archetype in {"chapter_index", "priority_stack", "step_ladder"}:
         return "\n".join(
             _alpha_rect_shape(204 + offset, 11100000 + offset * 170000, 720000, 42000, 4850000, accent, 38000 + offset * 9000, name="Vertical Rhythm")
             for offset in range(3)
         )
-    if archetype in {"system_map", "statement_focus"}:
+    if archetype in {"system_map", "statement_focus", "orbit_system"}:
         return "\n".join(
             [
                 _shape(204, "ellipse", 4240000, 1640000, 3740000, 3740000, soft, alpha=13000, line=accent),
                 _shape(205, "ellipse", 4920000, 2320000, 2380000, 2380000, blue, alpha=9000, line=accent),
             ]
         )
-    if archetype in {"proof_mosaic", "data_landscape", "split_comparison"}:
+    if archetype in {"proof_mosaic", "data_landscape", "split_comparison", "evidence_matrix"}:
         return "\n".join(
             _shape(204 + offset, "roundRect", 9000000 + (offset % 2) * 720000, 800000 + (offset // 2) * 620000, 520000, 420000, accent if offset % 2 == 0 else soft, alpha=12000 + offset * 3000)
             for offset in range(4)
         )
-    if archetype in {"process_ribbon", "diagonal_story"}:
+    if archetype in {"process_ribbon", "diagonal_story", "bridge_narrative", "gallery_strip"}:
         return "\n".join(
             [
                 _alpha_rect_shape(204, 720000, 5740000, 10500000, 30000, accent, 50000, name="Process Horizon"),
                 _shape(205, "ellipse", 900000 + (index % 3) * 2400000, 5480000, 420000, 420000, red, alpha=18000),
+            ]
+        )
+    if archetype in {"vertical_story", "spotlight_quote"}:
+        return "\n".join(
+            [
+                _alpha_rect_shape(204, 760000, 5700000, 6200000, 30000, accent, 48000, name="Editorial Baseline"),
+                _shape(205, "ellipse", 5700000, 780000, 680000, 680000, blue, alpha=14000),
             ]
         )
     return _alpha_rect_shape(204, 820000, 5660000, 10300000, 36000, accent, 46000, name="Closing Horizon")
@@ -4179,7 +4238,7 @@ def _treatment_pic_shape(slide, visual_asset: VisualAsset | None) -> str:
 
 def _render_block_limit(slide) -> int:
     design_plan = getattr(slide, "design_plan", None)
-    return 5 if getattr(design_plan, "composition_archetype", "") == "system_map" else 4
+    return 5 if getattr(design_plan, "composition_archetype", "") in {"system_map", "orbit_system"} else 4
 
 
 def _content_blocks(slide, *, deck_title: str = "", max_blocks: int = 4) -> list:
@@ -4521,6 +4580,14 @@ def _layout_shapes(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
         "system_map": _system_map_layout,
         "split_comparison": _split_comparison_layout,
         "priority_stack": _priority_stack_layout,
+        "gallery_strip": _gallery_strip_layout,
+        "vertical_story": _vertical_story_layout,
+        "spotlight_quote": _spotlight_quote_layout,
+        "evidence_matrix": _evidence_matrix_layout,
+        "orbit_system": _orbit_system_layout,
+        "step_ladder": _step_ladder_layout,
+        "bridge_narrative": _bridge_narrative_layout,
+        "closing_bloom": _closing_bloom_layout,
         "manifesto_close": _manifesto_close_layout,
         "future_horizon": _future_horizon_layout,
         "closing_echo": _closing_layout,
@@ -5042,6 +5109,193 @@ def _priority_stack_layout(slide, blocks: list, fg: str, accent: str, soft: str)
             )
         )
     return "\n".join([_title_and_subtitle(slide, fg, title_y=390000, title_size=2900), *cards])
+
+
+def _gallery_strip_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
+    """An editorial gallery page: image strip above, verdict and tiles below."""
+
+    items = blocks[:3] or blocks[:1]
+    cards = [
+        _card_shape(
+            230 + index,
+            block.content,
+            760000 + index * 3700000,
+            4100000,
+            3380000,
+            960000,
+            soft,
+            fg,
+            accent,
+        )
+        for index, block in enumerate(items)
+    ]
+    lead = items[0].content if items else slide.title
+    return "\n".join(
+        [
+            _text_shape(226, _ppt_title_text(slide.title), 760000, 2450000, 7100000, 820000, _ppt_title_font_size(_ppt_title_text(slide.title)), fg, bold=True),
+            _text_shape(227, slide.subtitle or lead, 780000, 3380000, 6900000, 400000, 1500, accent, bold=True),
+            _rect_shape(228, 780000, 3890000, 5800000, 32000, accent),
+            *cards,
+        ]
+    )
+
+
+def _vertical_story_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
+    """A tall image chapter page with a left-aligned editorial reading column."""
+
+    items = blocks[:3] or blocks[:1]
+    cards = [
+        _card_shape(240 + index, block.content, 760000, 2800000 + index * 980000, 6500000, 740000, soft, fg, accent)
+        for index, block in enumerate(items)
+    ]
+    return "\n".join(
+        [
+            _rect_shape(236, 760000, 700000, 72000, 1520000, accent),
+            _text_shape(237, _ppt_title_text(slide.title), 1080000, 760000, 6500000, 1280000, _ppt_title_font_size(_ppt_title_text(slide.title), cover=True), fg, bold=True),
+            (_text_shape(238, slide.subtitle, 1100000, 2160000, 6300000, 380000, 1450, accent, bold=True) if slide.subtitle else ""),
+            *cards,
+        ]
+    )
+
+
+def _spotlight_quote_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
+    """A claim-led page with one visual spotlight, not a standard card grid."""
+
+    statement = blocks[0].content if blocks else slide.title
+    support = blocks[1:3]
+    small_cards = [
+        _card_shape(253 + index, block.content, 780000 + index * 3020000, 4800000, 2720000, 700000, soft, fg, accent)
+        for index, block in enumerate(support)
+    ]
+    return "\n".join(
+        [
+            _text_shape(248, "\u201c", 660000, 1270000, 720000, 1100000, 5200, accent, bold=True),
+            _text_shape(249, _ppt_title_text(slide.title), 1300000, 780000, 5300000, 720000, _ppt_title_font_size(_ppt_title_text(slide.title)), accent, bold=True),
+            _text_shape(250, statement, 1320000, 1710000, 5100000, 2050000, _ppt_statement_font_size(statement), fg, bold=True),
+            _rect_shape(251, 1320000, 4040000, 3800000, 28000, accent),
+            *small_cards,
+        ]
+    )
+
+
+def _evidence_matrix_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
+    """A four-cell decision matrix that reserves a distinct left evidence visual."""
+
+    items = blocks[:4] or blocks[:1]
+    positions = (
+        (4780000, 1880000),
+        (7700000, 1880000),
+        (4780000, 3500000),
+        (7700000, 3500000),
+    )
+    cards = [
+        _card_shape(264 + index, block.content, x, y, 2540000, 1220000, soft, fg, accent)
+        for index, (block, (x, y)) in enumerate(zip(items, positions))
+    ]
+    return "\n".join(
+        [
+            _text_shape(260, _ppt_title_text(slide.title), 4780000, 520000, 6200000, 780000, _ppt_title_font_size(_ppt_title_text(slide.title)), fg, bold=True),
+            (_text_shape(261, slide.subtitle, 4800000, 1380000, 5900000, 350000, 1420, accent, bold=True) if slide.subtitle else ""),
+            _shape(262, "roundRect", 650000, 1880000, 3600000, 3240000, soft, alpha=18000, line=accent),
+            _text_shape(263, "Evidence", 1050000, 2120000, 2780000, 420000, 1350, accent, bold=True, align="ctr"),
+            *cards,
+        ]
+    )
+
+
+def _orbit_system_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
+    """A four-pole system map surrounding a central visual anchor."""
+
+    items = blocks[:4] or blocks[:1]
+    positions = (
+        (740000, 1660000, 3000000, 760000),
+        (8460000, 1660000, 3000000, 760000),
+        (740000, 4300000, 3000000, 760000),
+        (8460000, 4300000, 3000000, 760000),
+    )
+    cards = [
+        _card_shape(278 + index, block.content, x, y, cx, cy, soft, fg, accent)
+        for index, (block, (x, y, cx, cy)) in enumerate(zip(items, positions))
+    ]
+    center = _ppt_title_text(slide.title)
+    return "\n".join(
+        [
+            _text_shape(274, center, 3160000, 540000, 5860000, 620000, 2450, fg, bold=True, align="ctr"),
+            _shape(275, "ellipse", 4140000, 1560000, 3640000, 3640000, soft, alpha=12000, line=accent),
+            _shape(276, "ellipse", 4860000, 2280000, 2200000, 2200000, accent, alpha=18000),
+            (_text_shape(277, slide.subtitle, 4080000, 5030000, 3760000, 300000, 1280, accent, bold=True, align="ctr") if slide.subtitle else ""),
+            *cards,
+        ]
+    )
+
+
+def _step_ladder_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
+    """A rising action ladder with an image field on the left."""
+
+    items = blocks[:4] or blocks[:1]
+    cards = []
+    for index, block in enumerate(items):
+        cards.append(
+            _card_shape(
+                290 + index,
+                block.content,
+                4460000 + index * 260000,
+                2280000 + index * 760000,
+                6060000 - index * 260000,
+                570000,
+                soft,
+                fg,
+                accent,
+            )
+        )
+    return "\n".join(
+        [
+            _text_shape(286, _ppt_title_text(slide.title), 4460000, 700000, 6500000, 970000, _ppt_title_font_size(_ppt_title_text(slide.title)), fg, bold=True),
+            (_text_shape(287, slide.subtitle, 4480000, 1740000, 6180000, 330000, 1400, accent, bold=True) if slide.subtitle else ""),
+            _rect_shape(288, 4440000, 2140000, 3600000, 26000, accent),
+            *cards,
+        ]
+    )
+
+
+def _bridge_narrative_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
+    """A bridge page: decision claim at left and three connected moves below."""
+
+    items = blocks[:3] or blocks[:1]
+    cards = [
+        _card_shape(303 + index, block.content, 760000 + index * 3740000, 4720000, 3380000, 740000, soft, fg, accent)
+        for index, block in enumerate(items)
+    ]
+    lead = items[0].content if items else slide.title
+    return "\n".join(
+        [
+            _text_shape(299, _ppt_title_text(slide.title), 760000, 760000, 5440000, 850000, _ppt_title_font_size(_ppt_title_text(slide.title)), fg, bold=True),
+            _text_shape(300, lead, 780000, 1830000, 5160000, 1380000, _ppt_statement_font_size(lead, compact=True), fg, bold=True),
+            _alpha_rect_shape(301, 780000, 3570000, 4900000, 32000, accent, 68000, name="Bridge Decision Rail"),
+            _text_shape(302, slide.subtitle or "Decision bridge", 800000, 3850000, 4920000, 300000, 1320, accent, bold=True),
+            *cards,
+        ]
+    )
+
+
+def _closing_bloom_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
+    """A full-bleed closing page with a protected central decision statement."""
+
+    takeaway = blocks[0].content if blocks else slide.speaker_notes
+    support = blocks[1:3]
+    cards = [
+        _card_shape(315 + index, block.content, 2640000 + index * 3660000, 4880000, 3220000, 620000, soft, fg, accent)
+        for index, block in enumerate(support)
+    ]
+    return "\n".join(
+        [
+            _shape(310, "ellipse", 5040000, 650000, 1960000, 1960000, accent, alpha=18000),
+            _text_shape(311, _ppt_title_text(slide.title), 1680000, 1760000, 8600000, 1050000, _ppt_title_font_size(_ppt_title_text(slide.title), cover=True), fg, bold=True, align="ctr"),
+            _text_shape(312, takeaway, 2600000, 3120000, 6600000, 880000, 1950, fg, align="ctr"),
+            _rect_shape(313, 4000000, 4420000, 4200000, 30000, accent),
+            *cards,
+        ]
+    )
 
 
 def _manifesto_close_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:

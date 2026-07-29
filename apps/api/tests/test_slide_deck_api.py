@@ -308,7 +308,7 @@ def test_research_deck_reserves_unique_compositions_for_a_long_repeated_section(
     assert generated.status_code == 200
     outline = generated.json()["outlineDecision"]
     template = next(slide for slide in outline["slides"] if slide["purpose"] == "insight")
-    for index in range(9, 15):
+    for index in range(9, 23):
         extra = deepcopy(template)
         extra["title"] = f"研究洞察 {index}"
         extra["keyPoint"] = f"第 {index} 个研究洞察需要采用独立构图来呈现。"
@@ -340,8 +340,26 @@ def test_research_deck_reserves_unique_compositions_for_a_long_repeated_section(
     assert assembled.status_code == 200
     plans = [slide["designPlan"] for slide in assembled.json()["slideDeck"]["slides"]]
     archetypes = [plan["compositionArchetype"] for plan in plans]
-    assert len(archetypes) == 14
+    assert len(archetypes) == 22
     assert len(set(archetypes)) == len(archetypes)
+
+    rendered = client.post(
+        "/api/projects/project-deck/render",
+        json={"slideDeckVersion": assembled.json()["version"]},
+    )
+    assert rendered.status_code == 200
+    quality = client.post(
+        "/api/projects/project-deck/quality/check",
+        json={"renderVersion": rendered.json()["version"]},
+    )
+    assert quality.status_code == 200
+    structure_gate = next(
+        check
+        for check in quality.json()["qualityReport"]["checks"]
+        if check["name"] == "pptx_layout_structure_diversity"
+    )
+    assert structure_gate["status"] == "passed"
+    assert "22 distinct native page structures" in structure_gate["detail"]
 
 
 def test_assembled_deck_uses_edited_outline(client) -> None:
