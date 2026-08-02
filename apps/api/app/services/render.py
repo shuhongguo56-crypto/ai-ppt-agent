@@ -238,32 +238,27 @@ def resolve_visual_assets(
     seen_image_hashes: set[str] = set()
     image_plan_by_slide = {item.slide: item for item in deck.image_plan}
     candidate_assets: dict[int, VisualAsset | None] = {}
+    # Enterprise decks value a relevant, licensed photograph over an instant
+    # abstract substitute.  The old 0.8s default was enough to retrieve JSON
+    # but routinely expired while downloading the selected image, causing a
+    # whole demo deck to fall back to owned diagrams.  Keep an explicit caller
+    # budget untouched, while giving the research/enterprise path enough time
+    # to complete the photo-first cascade in parallel.
+    if expert_mode and image_search_timeout_seconds is None:
+        image_search_timeout_seconds = 3.0
 
     def resolve_candidate(slide) -> tuple[int, VisualAsset | None]:
         image_item = image_plan_by_slide[slide.slide_index]
-        # Diagram and concept pages still try the open-web search, but do not
-        # spend a slow free-image request on a photograph we will intentionally
-        # replace with the owned explanatory visual below.
-        visual_cues = (
-            f"{getattr(deck, 'title', '')} {slide.title} "
-            f"{image_item.search_query} {image_item.purpose}"
-        )
-        use_owned_visual = _uses_owned_explainer_visual(
-            image_item.image_type,
-            expert_mode=expert_mode,
-            semantic_cues=visual_cues,
-        )
-        candidate_gateway = (
-            None
-            if use_owned_visual
-            else image_gateway
-        )
+        # Every page gets one photo/illustration sourcing attempt first.  A
+        # framework or evidence page may ultimately use an owned explanation,
+        # but it must not silently skip the real-image cascade.  That is what
+        # previously made an entire demo look like it had no images.
         asset = _resolve_visual_asset_candidate(
             slide,
             image_item,
             deck,
             assets_dir,
-            candidate_gateway,
+            image_gateway,
             mode=mode,
             image_search_enabled=image_search_enabled,
             image_search_timeout_seconds=image_search_timeout_seconds,
@@ -291,14 +286,6 @@ def resolve_visual_assets(
                 slide
                 for slide in deck.slides
                 if candidate_assets.get(slide.slide_index) is None
-                and not _uses_owned_explainer_visual(
-                    image_plan_by_slide[slide.slide_index].image_type,
-                    expert_mode=expert_mode,
-                    semantic_cues=(
-                        f"{getattr(deck, 'title', '')} {slide.title} "
-                        f"{image_plan_by_slide[slide.slide_index].search_query}"
-                    ),
-                )
             ]
             if not missing_slides:
                 break
@@ -399,33 +386,10 @@ def resolve_visual_assets(
                 seen_image_hashes=seen_image_hashes,
             )
         if asset is None:
-            asset = _write_local_visual_asset(
-                slide.slide_index,
-                query,
-                assets_dir,
-                image_type=image_item.image_type,
-                purpose=image_item.purpose,
-                prompt=image_item.prompt,
-                provider_chain=list(image_item.provider_chain),
-                slide_title=slide.title,
-                slide_intent=slide.visual_intent,
-                image_treatment=slide.design_plan.image_treatment,
-                composition_archetype=slide.design_plan.composition_archetype,
-                palette=page_palette,
-            )
-        if _uses_owned_explainer_visual(
-            image_item.image_type,
-            expert_mode=expert_mode,
-            semantic_cues=(
-                f"{getattr(deck, 'title', '')} {slide.title} "
-                f"{image_item.search_query} {image_item.purpose}"
-            ),
-        ):
-            # Stock photos are a poor explanation for a framework, evidence, or
-            # insight page.  The open-web search has still run above, but this
-            # page class benefits from our owned, no-text explanatory visual
-            # library: its geometry is derived from the page role and stays
-            # editable-safe in both PPTX and HyperFrames.
+            # This is a delivery-safe last resort, never the primary route.
+            # It remains a high-resolution, page-specific graphic rather than
+            # an SVG placeholder so the deck still contains a usable visual if
+            # the web and configured image providers are temporarily offline.
             asset = _write_owned_explainer_visual_asset(
                 slide.slide_index,
                 query,
@@ -1536,6 +1500,8 @@ def _generate_visual_asset_with_ai(
         )
     except (ModelGatewayError, ValueError, OSError):
         return None
+    if generated is None:
+        return None
     extension = _extension_for_mime(generated.mime_type)
     file_name = f"slide-{slide_index}-ai{extension}"
     path = assets_dir / file_name
@@ -2115,25 +2081,17 @@ def _uses_owned_explainer_visual(
     expert_mode: bool,
     semantic_cues: str = "",
 ) -> bool:
-    """Use an owned explanatory image where a stock photograph is misleading.
+    """Compatibility predicate for legacy callers.
 
-    These are not placeholder backgrounds.  They are page-specific visual
-    explanations for frameworks, evidence and conceptual insight pages.  The
-    preceding web-search pass remains useful for photograph-led slide types.
+    The renderer used to force framework, evidence and education pages through
+    the owned-graphic branch before it tried a licensed photo or configured
+    image provider.  That was technically valid but visually read as an
+    image-less template deck.  Owned visuals now exist only as the final
+    delivery-safe fallback in :func:`resolve_visual_assets`, after the
+    page-specific sourcing cascade has had a fair opportunity to succeed.
     """
-    if not expert_mode:
-        return False
-    if image_type in {"icon_illustration", "data_visual", "thesis_concept"}:
-        return True
-    # A no-key free image provider is not reliable enough to represent a
-    # responsible-AI teaching scenario with real people.  Prefer a clear
-    # owned visual system over an empty classroom or a decorative object; this
-    # branch remains narrowly scoped to this research narrative.
-    return _is_ai_education_content(semantic_cues) and image_type in {
-        "background",
-        "course_review_atmosphere",
-        "business_scene",
-    }
+    _ = (image_type, expert_mode, semantic_cues)
+    return False
 
 
 def _write_owned_explainer_visual_asset(
@@ -4893,21 +4851,51 @@ def _slide_visual_palette(palette: list[str], slide) -> tuple[str, str, str, str
         "future_horizon",
         "closing_echo",
     }
+    # The direction owns the design grammar; the page job owns its local face.
+    # A restrained accent rotation prevents a deck from reading as eight copies
+    # of one lavender card while preserving enough family resemblance for a
+    # client delivery.  All swatches are deliberately dark enough to remain
+    # legible on the paper faces below.
+    archetype_accents = {
+        "cinematic_hero": "B98643",
+        "editorial_cover": "8F4E6B",
+        "chapter_index": "18747A",
+        "editorial_split": "8A5A22",
+        "statement_focus": "6E549E",
+        "proof_mosaic": "AD563F",
+        "data_landscape": "2A6491",
+        "process_ribbon": "1F795F",
+        "system_map": "465EAA",
+        "split_comparison": "AA4D68",
+        "priority_stack": "326D62",
+        "gallery_strip": "92662B",
+        "vertical_story": "415C93",
+        "spotlight_quote": "8E4A70",
+        "evidence_matrix": "A15538",
+        "step_ladder": "246F75",
+        "bridge_narrative": "5F629B",
+        "closing_bloom": "B98643",
+        "manifesto_close": "7E5A9D",
+        "future_horizon": "33756F",
+        "closing_echo": "95602D",
+    }
+    page_accent = archetype_accents.get(archetype, theme_accent)
     if dark_anchor:
         bg = theme_bg if not _is_light_color(theme_bg) else _mix_ppt_colors(theme_bg, "05080D", 0.86)
         fg = theme_fg if _is_light_color(theme_fg) else "FAF8F2"
-        accent = theme_accent if _is_light_color(theme_accent) else _mix_ppt_colors(theme_accent, "FFFFFF", 0.28)
-        soft = _mix_ppt_colors(bg, theme_soft if _is_light_color(theme_soft) else accent, 0.16)
+        raw_accent = _mix_ppt_colors(theme_accent, page_accent, 0.42)
+        accent = raw_accent if _is_light_color(raw_accent) else _mix_ppt_colors(raw_accent, "FFFFFF", 0.28)
+        soft = _mix_ppt_colors(bg, accent, 0.16)
         return bg, fg, accent, soft, contrast_a, contrast_b
 
     paper_faces = ("F7F6F1", "EEF4F7", "F4F0E8", "EEF5F0", "F5EEF1")
     bg = paper_faces[(index - 1) % len(paper_faces)]
     fg = theme_bg if not _is_light_color(theme_bg) else "10211E"
-    raw_accent = theme_accent
+    raw_accent = _mix_ppt_colors(theme_accent, page_accent, 0.58)
     accent = _mix_ppt_colors(raw_accent, fg, 0.48) if _is_light_color(raw_accent) else raw_accent
     soft = _mix_ppt_colors(bg, raw_accent, 0.13)
-    red = _mix_ppt_colors(bg, contrast_a, 0.24)
-    blue = _mix_ppt_colors(bg, contrast_b, 0.24)
+    red = _mix_ppt_colors(bg, _mix_ppt_colors(contrast_a, page_accent, 0.36), 0.24)
+    blue = _mix_ppt_colors(bg, _mix_ppt_colors(contrast_b, page_accent, 0.28), 0.24)
     return bg, fg, accent, soft, red, blue
 
 

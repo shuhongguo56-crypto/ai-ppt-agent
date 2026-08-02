@@ -359,23 +359,25 @@ def test_owned_explainer_visual_is_a_delivery_safe_raster_asset(tmp_path) -> Non
     # Owned explanatory visuals export at the delivery-safe 16:9 floor instead
     # of passing through an AI upscaler that can damage vector-like artwork.
     assert render_service.raster_dimensions(asset.path) == (1920, 1080)
-    assert render_service._uses_owned_explainer_visual("data_visual", expert_mode=True)
+    # Owned diagrams are now a last resort: real licensed or configured AI
+    # visuals are always attempted first, including framework pages.
+    assert not render_service._uses_owned_explainer_visual("data_visual", expert_mode=True)
     assert not render_service._uses_owned_explainer_visual("business_scene", expert_mode=True)
-    assert render_service._uses_owned_explainer_visual(
+    assert not render_service._uses_owned_explainer_visual(
         "course_review_atmosphere",
         expert_mode=True,
         semantic_cues="generative AI adoption in higher education",
     )
 
 
-def test_owned_explainer_page_skips_wasted_free_image_generation(tmp_path) -> None:
-    class NoCallImageGateway:
+def test_owned_explainer_visual_is_last_resort_after_image_generation(tmp_path) -> None:
+    class UnavailableImageGateway:
         def __init__(self) -> None:
             self.calls = 0
 
         def generate(self, _request):
             self.calls += 1
-            raise AssertionError("owned explainer page should not invoke the free image provider")
+            return None
 
     slide = SimpleNamespace(
         slide_index=1,
@@ -395,7 +397,7 @@ def test_owned_explainer_page_skips_wasted_free_image_generation(tmp_path) -> No
         prompt="semantic framework visual",
         provider_chain=["open_web_search", "HumanizePPT owned visual library"],
     )
-    gateway = NoCallImageGateway()
+    gateway = UnavailableImageGateway()
     deck = SimpleNamespace(
         slides=[slide],
         image_plan=[image_plan],
@@ -412,7 +414,7 @@ def test_owned_explainer_page_skips_wasted_free_image_generation(tmp_path) -> No
         realesrgan_executable=None,
     )
 
-    assert gateway.calls == 0
+    assert gateway.calls > 0
     assert assets[1].source_type == "owned_design_library"
 
 
@@ -912,6 +914,8 @@ def test_open_visual_search_uses_openverse_licensed_images(tmp_path, monkeypatch
     monkeypatch.delenv("AI_PPT_BING_IMAGE_SEARCH_KEY", raising=False)
 
     def fake_read_json_url(url: str, *, timeout: float, headers: dict[str, str] | None = None) -> dict:
+        if "commons.wikimedia.org/w/api.php" in url:
+            return {"query": {"pages": {}}}
         assert "api.openverse.org/v1/images/" in url
         assert "license_type=commercial" in url
         assert headers and "openverse" in headers["User-Agent"]
