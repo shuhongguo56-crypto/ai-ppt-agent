@@ -2808,9 +2808,14 @@ def _cross_language_image_queries(query: str, image_type: str) -> list[str]:
         return education_queries.get(
             page_job,
             [
-                "university faculty students collaborative learning",
-                "higher education teaching workshop",
+                # The image-plan query does not always retain the page-purpose
+                # token that drove its original design.  These short, concrete
+                # library searches are deliberately stronger than a generic
+                # "AI education" phrase and return real people rather than a
+                # stock technology backdrop.
+                "university students seminar",
                 "university classroom discussion",
+                "university teaching workshop",
             ],
         )
     enterprise_ai = (
