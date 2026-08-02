@@ -338,6 +338,26 @@ def resolve_visual_assets(
         page_palette = list(_slide_visual_palette(deck.theme.palette, slide)[:4])
         asset = candidate_assets.get(slide.slide_index)
         if asset is not None and _visual_asset_hash(asset.path) in seen_image_hashes:
+            # Before asking a generator for another try, exhaust the free
+            # licensed-photo cascade with the already-used image excluded.  It
+            # is both more reliable and more semantically grounded than
+            # prompting a no-key model to invent another nearly identical
+            # classroom scene.
+            alternative = _search_open_visual_asset(
+                slide.slide_index,
+                query,
+                assets_dir,
+                image_type=image_item.image_type,
+                purpose=image_item.purpose,
+                prompt=image_item.prompt,
+                provider_chain=list(image_item.provider_chain),
+                enabled=image_search_enabled,
+                timeout_seconds=image_search_timeout_seconds,
+                excluded_hashes=seen_image_hashes,
+            )
+            alternative_hash = _visual_asset_hash(alternative.path) if alternative is not None else ""
+            asset = alternative if alternative_hash and alternative_hash not in seen_image_hashes else None
+        if asset is None or _visual_asset_hash(asset.path) in seen_image_hashes:
             # A searched or generated image can be returned for multiple pages by an
             # upstream provider. Retry with an explicit page-specific variation, and
             # only accept the replacement after verifying its actual bytes are unique.
@@ -894,6 +914,7 @@ def _search_open_visual_asset(
     provider_chain: list[str],
     enabled: bool = True,
     timeout_seconds: float | None = None,
+    excluded_hashes: set[str] | None = None,
 ) -> VisualAsset | None:
     if not enabled or os.getenv("AI_PPT_IMAGE_SEARCH_ENABLED", "true").strip().lower() in {"0", "false", "no", "off"}:
         return None
@@ -918,6 +939,14 @@ def _search_open_visual_asset(
                 timeout_seconds=timeout_seconds,
             )
             if asset is not None:
+                # A source can surface the same photo for several related
+                # page queries.  Continue through the next search intent when
+                # it has already been used instead of giving up and replacing
+                # the page with a diagram or a low-quality generation.
+                asset_hash = _visual_asset_hash(asset.path)
+                if excluded_hashes and asset_hash and asset_hash in excluded_hashes:
+                    asset.path.unlink(missing_ok=True)
+                    continue
                 return asset
     return None
 
