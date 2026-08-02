@@ -11,6 +11,10 @@ class Settings(BaseSettings):
 
     app_name: str = "ai-ppt-api"
     app_version: str = "0.1.0"
+    # Set by the public-runtime supervisor. It is deliberately non-secret so
+    # the static entry can distinguish a live but outdated worker from the
+    # revision it is expected to serve.
+    build_revision: str = "local"
     database_path: Path = Path(".local/ai-ppt.db")
     asset_path: Path = Path(".local/assets")
     allowed_origins: list[str] = Field(

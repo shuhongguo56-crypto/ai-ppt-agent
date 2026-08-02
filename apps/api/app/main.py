@@ -377,6 +377,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             model_readiness_message = "Fake mode is ready for deterministic local testing."
         return {
             "status": "ok",
+            "service": resolved.app_name,
+            "appVersion": resolved.app_version,
+            "buildRevision": resolved.build_revision,
             "modelBackend": resolved.model_backend,
             "realModelEnabled": resolved.model_backend in {"openai", "cascade"},
             "realModelReady": (

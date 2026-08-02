@@ -16,11 +16,26 @@ $TunnelOutLog = Join-Path $RuntimeRoot "cloudflared.out.log"
 $TunnelErrLog = Join-Path $RuntimeRoot "cloudflared.err.log"
 $PublicEntry = "https://shuhongguo56-crypto.github.io/ai-ppt-agent/live/"
 $LocalRuntimeStatus = "http://127.0.0.1:8000/api/runtime/status"
+$RuntimeProbe = Join-Path $PSScriptRoot "runtime_probe.py"
+
+$Python = Join-Path $RepoRoot ".venv\Scripts\python.exe"
+if (-not (Test-Path -LiteralPath $Python)) {
+  $Python = (Get-Command python -ErrorAction Stop).Source
+}
+$BuildRevision = (git -C $RepoRoot rev-parse --short HEAD 2>$null).Trim()
+if (-not $BuildRevision) { $BuildRevision = "local" }
 
 New-Item -ItemType Directory -Force -Path $RuntimeRoot | Out-Null
 
 function Test-Endpoint([string]$Url) {
   if (-not $Url) { return $false }
+  # Prefer Python's OpenSSL verification.  On several Windows installations
+  # Invoke-WebRequest/Schannel reports a TLS handshake error for a healthy
+  # trycloudflare endpoint, which previously left the public redirect stale.
+  if (Test-Path -LiteralPath $RuntimeProbe) {
+    $probe = Invoke-RuntimeProbe $Url
+    if ($probe.ExitCode -eq 0) { return $true }
+  }
   try {
     $response = Invoke-WebRequest -UseBasicParsing -Uri $Url -TimeoutSec 12
     return $response.StatusCode -eq 200
@@ -29,16 +44,75 @@ function Test-Endpoint([string]$Url) {
   }
 }
 
+function Invoke-RuntimeProbe([string]$Url, [switch]$AsJson) {
+  $proxyState = @{}
+  $usesQuickTunnel = $Url -match "^https://[a-z0-9-]+\.trycloudflare\.com(?:/|$)"
+  if ($usesQuickTunnel) {
+    # The local developer proxy can terminate TLS to a quick tunnel before it
+    # reaches Cloudflare.  Probing the public origin directly keeps TLS
+    # validation on while avoiding that host-specific false negative.
+    foreach ($name in @("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")) {
+      $item = Get-Item -Path "Env:$name" -ErrorAction SilentlyContinue
+      $proxyState[$name] = if ($item) { $item.Value } else { $null }
+      Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue
+    }
+  }
+  try {
+    $arguments = if ($AsJson) { @($RuntimeProbe, "--json", $Url) } else { @($RuntimeProbe, $Url) }
+    $content = & $Python @arguments 2>$null
+    return [pscustomobject]@{
+      ExitCode = $LASTEXITCODE
+      Content = ($content -join "`n")
+    }
+  } finally {
+    if ($usesQuickTunnel) {
+      foreach ($name in $proxyState.Keys) {
+        if ($null -eq $proxyState[$name]) {
+          Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue
+        } else {
+          Set-Item -Path "Env:$name" -Value $proxyState[$name]
+        }
+      }
+    }
+  }
+}
+
+function Get-EndpointStatus([string]$Url) {
+  if (-not $Url) { return $null }
+  if (-not (Test-Path -LiteralPath $RuntimeProbe)) { return $null }
+  $probe = Invoke-RuntimeProbe $Url -AsJson
+  if ($probe.ExitCode -eq 0 -and $probe.Content) { return ($probe.Content | ConvertFrom-Json) }
+  return $null
+}
+
+function Stop-CurrentAiPptApi {
+  $runtime = Get-EndpointStatus $LocalRuntimeStatus
+  # Older project workers predate the service marker but still expose the
+  # modelBackend contract on this exact private status route.  Treat those as
+  # safe upgrade candidates; reject an unrelated listener.
+  if (-not $runtime -or $runtime.status -ne "ok" -or -not $runtime.modelBackend) {
+    throw "Port 8000 is occupied by a service that is not this AI PPT runtime."
+  }
+  $listener = Get-NetTCPConnection -State Listen -LocalPort 8000 -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+  if ($listener) {
+    Stop-Process -Id $listener.OwningProcess -Force
+    for ($attempt = 0; $attempt -lt 10; $attempt += 1) {
+      Start-Sleep -Milliseconds 400
+      if (-not (Test-Endpoint $LocalRuntimeStatus)) { return }
+    }
+  }
+}
+
 function Normalize-Origin([string]$Value) {
   return $Value.Trim().TrimEnd("/") -replace "/api$", ""
 }
 
 function Start-LocalApi {
-  if (Test-Endpoint $LocalRuntimeStatus) { return }
-
-  $python = Join-Path $RepoRoot ".venv\Scripts\python.exe"
-  if (-not (Test-Path -LiteralPath $python)) {
-    $python = (Get-Command python -ErrorAction Stop).Source
+  if (Test-Endpoint $LocalRuntimeStatus) {
+    $current = Get-EndpointStatus $LocalRuntimeStatus
+    if ($current -and $current.buildRevision -eq $BuildRevision) { return }
+    Stop-CurrentAiPptApi
   }
 
   $env:PYTHONPATH = @(
@@ -51,6 +125,7 @@ function Start-LocalApi {
   # appear to disappear.
   $env:AI_PPT_DATABASE_PATH = Join-Path $RepoRoot ".local\ai-ppt.db"
   $env:AI_PPT_ASSET_PATH = Join-Path $RepoRoot ".local\assets"
+  $env:AI_PPT_BUILD_REVISION = $BuildRevision
   $env:AI_PPT_MODEL_BACKEND = "cascade"
   $env:AI_PPT_IMAGE_SEARCH_ENABLED = "true"
   $env:AI_PPT_POLLINATIONS_IMAGE_ENABLED = "true"
@@ -73,7 +148,7 @@ function Start-LocalApi {
   $env:AI_PPT_TESSDATA_PATH = "D:\Codex\Downloads\tessdata"
   $env:AI_PPT_ALLOWED_ORIGINS = '["https://shuhongguo56-crypto.github.io","https://humanizeppt-studio.almond-gleam-4876.chatgpt.site","http://localhost:3001","http://127.0.0.1:3001"]'
 
-  Start-Process -FilePath $python -WorkingDirectory $RepoRoot -WindowStyle Hidden `
+  Start-Process -FilePath $Python -WorkingDirectory $RepoRoot -WindowStyle Hidden `
     -ArgumentList @("-m", "uvicorn", "app.main:app", "--app-dir", "apps/api", "--host", "127.0.0.1", "--port", "8000") `
     -RedirectStandardOutput $ApiOutLog -RedirectStandardError $ApiErrLog | Out-Null
 

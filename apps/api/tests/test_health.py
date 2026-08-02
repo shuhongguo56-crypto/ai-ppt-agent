@@ -131,6 +131,7 @@ def test_runtime_status_reports_model_backend_without_secrets(tmp_path) -> None:
             asset_path=tmp_path / "assets",
             model_backend="openai",
             openai_api_key="secret-key",
+            build_revision="test-revision",
         )
     )
     with TestClient(app) as test_client:
@@ -138,6 +139,9 @@ def test_runtime_status_reports_model_backend_without_secrets(tmp_path) -> None:
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["service"] == "ai-ppt-api"
+    assert payload["appVersion"] == "0.1.0"
+    assert payload["buildRevision"] == "test-revision"
     assert payload["modelBackend"] == "openai"
     assert payload["realModelEnabled"] is True
     assert payload["realModelReady"] is True
