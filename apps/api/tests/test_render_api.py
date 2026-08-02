@@ -1076,6 +1076,33 @@ def test_generic_search_fallback_cache_does_not_override_richer_query(tmp_path) 
     assert asset is None
 
 
+def test_owned_visual_cache_is_retried_for_photo_first_upgrade(tmp_path) -> None:
+    (tmp_path / "slide-2-owned-explainer.png").write_bytes(b"\x89PNG\r\n\x1a\nowned")
+    (tmp_path / "slide-2-asset.json").write_text(
+        json.dumps(
+            {
+                "fileName": "slide-2-owned-explainer.png",
+                "mimeType": "image/png",
+                "sourceType": "owned_design_library",
+                "query": "university teaching workshop",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    asset = render_service._read_cached_visual_asset(
+        2,
+        tmp_path,
+        expected_query="university faculty curriculum planning workshop",
+        image_type="course_review_atmosphere",
+        purpose="Show a collaborative university planning scene",
+        prompt="Award-winning university workshop photography",
+        provider_chain=["open_web_search"],
+    )
+
+    assert asset is None
+
+
 def test_openverse_ranking_prefers_specific_non_textual_metadata() -> None:
     specific = {
         "title": "Electric vehicle factory production line",

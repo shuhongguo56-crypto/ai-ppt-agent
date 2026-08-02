@@ -642,6 +642,13 @@ def _read_cached_visual_asset(
     source_type = str(data.get("sourceType") or "cached_visual_asset")
     if source_type in {"local_svg_fallback", "safe_vector_fallback", "local_deterministic_image"}:
         return None
+    if source_type == "owned_design_library":
+        # An older render may have used the owned graphic because the prior
+        # image search was too impatient or was intentionally bypassed.  Do not
+        # let that fallback become a permanent cache hit now that the
+        # photo-first pipeline is available; a fresh run should have a chance
+        # to upgrade it to a licensed or configured generated visual.
+        return None
     cached_query = str(data.get("query") or "")
     cached_attribution = str(data.get("attribution") or "")
     generic_queries = {
