@@ -1184,6 +1184,13 @@ def _minimum_candidate_relevance_score(query: str) -> int:
             "world",
         }
     }
+    # For documentary education photography, a catalogue title often names
+    # only the visible people ("students") rather than the institution and
+    # activity together.  One verified human-learning signal is more useful
+    # than falling through to a diagram, while the scene/text-risk gates still
+    # reject unrelated posters and screens.
+    if tokens & {"student", "students", "faculty", "classroom", "seminar", "workshop"}:
+        return 5
     if len(tokens) >= 2:
         return 10
     if tokens:
