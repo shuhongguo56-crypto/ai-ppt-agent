@@ -15,6 +15,7 @@ PROMOTABLE_SOURCES = {
     "wikimedia_commons_search",
     "ai_fallback",
     "free_ai_fallback",
+    "owned_design_library",
 }
 QUALITY_FLOOR = 80
 
@@ -64,7 +65,13 @@ def promote_asset(asset: Any, library_root: Path | None) -> bool:
             "contentHash": digest,
             "imageType": image_type,
             "sourceType": str(getattr(asset, "source_type", "")),
-            "licenseStatus": "generated" if "ai_fallback" in str(getattr(asset, "source_type", "")) else "open-license",
+            "licenseStatus": (
+                "owned"
+                if str(getattr(asset, "source_type", "")) == "owned_design_library"
+                else "generated"
+                if "ai_fallback" in str(getattr(asset, "source_type", ""))
+                else "open-license"
+            ),
             "qualityScore": score,
             "width": width,
             "height": height,

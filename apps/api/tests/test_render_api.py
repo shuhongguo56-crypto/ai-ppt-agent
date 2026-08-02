@@ -338,6 +338,29 @@ def test_commons_ranking_prefers_people_over_an_empty_classroom() -> None:
     assert human_score > empty_score
 
 
+def test_owned_explainer_visual_is_a_delivery_safe_raster_asset(tmp_path) -> None:
+    asset = render_service._write_owned_explainer_visual_asset(
+        4,
+        "generative AI higher education teaching learning assessment governance",
+        tmp_path,
+        image_type="icon_illustration",
+        purpose="framework",
+        prompt="semantic framework visual",
+        provider_chain=["open_web_search", "HumanizePPT owned visual library"],
+        slide_title="Four design layers",
+        slide_intent="Connect teaching, learning, assessment, and governance.",
+        composition_archetype="system_map",
+        palette=["#102A43", "#F4F1EA", "#CF8A4B", "#2B6CB0"],
+    )
+
+    assert asset.source_type == "owned_design_library"
+    assert asset.mime_type == "image/png"
+    assert asset.path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert render_service.raster_dimensions(asset.path) == (1600, 900)
+    assert render_service._uses_owned_explainer_visual("data_visual", expert_mode=True)
+    assert not render_service._uses_owned_explainer_visual("business_scene", expert_mode=True)
+
+
 def create_renderable_deck(client) -> dict:
     assert client.post("/api/projects", json=PROJECT).status_code == 201
     outline = client.post("/api/projects/project-render/outline/generate", json={})

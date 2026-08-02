@@ -14,6 +14,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib import parse, request as urlrequest
 
+from PIL import Image, ImageDraw, ImageFilter
+
 from ai_ppt_contracts import RenderResult, SlideDeck
 from app.ai.errors import ModelGatewayError
 from app.ai.models import ImageRequest
@@ -378,6 +380,25 @@ def resolve_visual_assets(
                 composition_archetype=slide.design_plan.composition_archetype,
                 palette=deck.theme.palette,
             )
+        if _uses_owned_explainer_visual(image_item.image_type, expert_mode=expert_mode):
+            # Stock photos are a poor explanation for a framework, evidence, or
+            # insight page.  The open-web search has still run above, but this
+            # page class benefits from our owned, no-text explanatory visual
+            # library: its geometry is derived from the page role and stays
+            # editable-safe in both PPTX and HyperFrames.
+            asset = _write_owned_explainer_visual_asset(
+                slide.slide_index,
+                query,
+                assets_dir,
+                image_type=image_item.image_type,
+                purpose=image_item.purpose,
+                prompt=image_item.prompt,
+                provider_chain=list(image_item.provider_chain),
+                slide_title=slide.title,
+                slide_intent=slide.visual_intent,
+                composition_archetype=slide.design_plan.composition_archetype,
+                palette=deck.theme.palette,
+            )
         # Keep the source fingerprint as well as the delivery fingerprint.
         # A prior slide may already have been upscaled, in which case comparing
         # only its final PNG bytes lets the same downloaded JPEG slip onto a
@@ -443,6 +464,7 @@ def _recover_prior_version_visual_asset(
         "openverse_search",
         "ai_fallback",
         "free_ai_fallback",
+        "owned_design_library",
     }
     for version in range(current_version - 1, 0, -1):
         previous_assets = current_render_dir.parent / f"slide-deck-v{version}" / "assets"
@@ -701,6 +723,8 @@ def _write_cached_visual_asset(asset: VisualAsset, assets_dir: Path) -> None:
 def _visual_asset_license_status(source_type: str) -> str:
     if source_type in {"ai_fallback", "free_ai_fallback"}:
         return "generated"
+    if source_type == "owned_design_library":
+        return "owned"
     if source_type in {"openverse_search", "wikimedia_commons_search"}:
         return "open-license"
     return "unknown"
@@ -2043,6 +2067,214 @@ def _safe_ai_image_subject(slide_title: str, slide_intent: str, purpose: str) ->
     raw = re.sub(r"[“”\"'《》<>]", " ", raw)
     raw = re.sub(r"\s+", " ", raw).strip()
     return _clip_for_asset(raw, 180)
+
+
+def _uses_owned_explainer_visual(image_type: str, *, expert_mode: bool) -> bool:
+    """Use an owned explanatory image where a stock photograph is misleading.
+
+    These are not placeholder backgrounds.  They are page-specific visual
+    explanations for frameworks, evidence and conceptual insight pages.  The
+    preceding web-search pass remains useful for photograph-led slide types.
+    """
+    return expert_mode and image_type in {
+        "icon_illustration",
+        "data_visual",
+        "thesis_concept",
+    }
+
+
+def _write_owned_explainer_visual_asset(
+    slide_index: int,
+    query: str,
+    assets_dir: Path,
+    *,
+    image_type: str,
+    purpose: str,
+    prompt: str,
+    provider_chain: list[str],
+    slide_title: str,
+    slide_intent: str,
+    composition_archetype: str,
+    palette: list[str],
+) -> VisualAsset:
+    """Render a high-resolution, text-free owned visual from the design library.
+
+    The export does not put slide copy inside the image.  Instead, each visual
+    uses a distinct geometry (system constellation, evidence progression, or
+    conceptual feedback loop) to give the page depth while the editable PPT
+    text carries the actual labels.
+    """
+    width, height = 1600, 900
+
+    def rgb(value: str, fallback: tuple[int, int, int]) -> tuple[int, int, int]:
+        match = re.fullmatch(r"#?([0-9a-fA-F]{6})", str(value or "").strip())
+        if match is None:
+            return fallback
+        raw = match.group(1)
+        return tuple(int(raw[index : index + 2], 16) for index in (0, 2, 4))
+
+    bg = rgb(palette[0] if palette else "", (9, 18, 33))
+    ink = rgb(palette[1] if len(palette) > 1 else "", (243, 240, 232))
+    accent = rgb(palette[2] if len(palette) > 2 else "", (207, 138, 75))
+    support = rgb(palette[3] if len(palette) > 3 else "", (70, 123, 165))
+    seed = int.from_bytes(
+        hashlib.sha256(
+            f"{slide_index}|{query}|{purpose}|{composition_archetype}".encode("utf-8")
+        ).digest()[:4],
+        "big",
+    )
+
+    canvas = Image.new("RGBA", (width, height), (*bg, 255))
+    pixels = canvas.load()
+    for y in range(height):
+        progress = y / max(1, height - 1)
+        lift = int(15 * (1 - progress) + 3 * progress)
+        for x in range(width):
+            diagonal = ((x / max(1, width - 1)) * 8) + lift
+            pixels[x, y] = (
+                min(255, int(bg[0] + diagonal)),
+                min(255, int(bg[1] + diagonal)),
+                min(255, int(bg[2] + diagonal)),
+                255,
+            )
+
+    atmosphere = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    atmosphere_draw = ImageDraw.Draw(atmosphere)
+    glow_centers = [
+        (int(width * 0.16), int(height * 0.20), accent),
+        (int(width * 0.84), int(height * 0.72), support),
+        (int(width * (0.42 + (seed % 17) / 100)), int(height * 0.52), ink),
+    ]
+    for center_x, center_y, color in glow_centers:
+        radius = 190 + (seed % 70)
+        atmosphere_draw.ellipse(
+            (center_x - radius, center_y - radius, center_x + radius, center_y + radius),
+            fill=(*color, 54),
+        )
+    atmosphere = atmosphere.filter(ImageFilter.GaussianBlur(92))
+    canvas.alpha_composite(atmosphere)
+
+    shadow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow)
+    foreground = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(foreground)
+
+    def rounded_box(box: tuple[int, int, int, int], fill: tuple[int, int, int, int], radius: int = 28) -> None:
+        offset_box = tuple(value + (10 if index % 2 == 0 else 14) for index, value in enumerate(box))
+        shadow_draw.rounded_rectangle(offset_box, radius=radius, fill=(0, 0, 0, 86))
+        draw.rounded_rectangle(box, radius=radius, fill=fill, outline=(*ink, 68), width=2)
+
+    def node(center_x: int, center_y: int, radius: int, color: tuple[int, int, int]) -> None:
+        shadow_draw.ellipse(
+            (center_x - radius + 9, center_y - radius + 13, center_x + radius + 9, center_y + radius + 13),
+            fill=(0, 0, 0, 110),
+        )
+        draw.ellipse(
+            (center_x - radius, center_y - radius, center_x + radius, center_y + radius),
+            fill=(*color, 226),
+            outline=(*ink, 118),
+            width=3,
+        )
+        draw.ellipse(
+            (center_x - radius // 2, center_y - radius // 2, center_x + radius // 2, center_y + radius // 2),
+            fill=(*ink, 34),
+        )
+
+    if image_type == "icon_illustration":
+        variants = [
+            [(320, 254), (765, 190), (1210, 314), (780, 662)],
+            [(302, 500), (628, 246), (996, 274), (1280, 570)],
+            [(368, 232), (1130, 214), (1128, 662), (382, 682)],
+        ]
+        points = variants[(slide_index + seed) % len(variants)]
+        center = (800, 450)
+        for point in points:
+            draw.line((center, point), fill=(*accent, 118), width=8)
+            draw.line((center, point), fill=(*ink, 42), width=2)
+        node(*center, 108, accent)
+        for index, point in enumerate(points):
+            rounded_box(
+                (point[0] - 116, point[1] - 76, point[0] + 116, point[1] + 76),
+                (*(support if index % 2 else accent), 164),
+                34,
+            )
+            node(point[0], point[1], 28, ink if index % 2 else support)
+    elif image_type == "data_visual":
+        baseline = 690
+        columns = [(300, 290), (640, 450), (980, 360), (1320, 580)]
+        for index, (center_x, top_y) in enumerate(columns):
+            column_width = 132
+            rounded_box(
+                (center_x - column_width // 2, top_y, center_x + column_width // 2, baseline),
+                (*(support if index in {1, 3} else accent), 172),
+                34,
+            )
+            node(center_x, top_y, 33, ink if index % 2 else accent)
+        points = [(x, y - 34) for x, y in columns]
+        draw.line(points, fill=(*ink, 150), width=11, joint="curve")
+        draw.line(points, fill=(*accent, 214), width=4, joint="curve")
+        for point in points:
+            node(*point, 20, ink)
+    else:
+        left_box = (246, 224, 748, 676)
+        right_box = (852, 224, 1354, 676)
+        rounded_box(left_box, (*support, 152), 58)
+        rounded_box(right_box, (*accent, 152), 58)
+        for index, center in enumerate(((496, 450), (1104, 450))):
+            node(*center, 96, accent if index == 0 else support)
+            draw.arc(
+                (center[0] - 142, center[1] - 142, center[0] + 142, center[1] + 142),
+                start=34 + index * 180,
+                end=274 + index * 180,
+                fill=(*ink, 176),
+                width=9,
+            )
+        draw.polygon(
+            [(748, 410), (852, 450), (748, 490)],
+            fill=(*ink, 176),
+        )
+        draw.polygon(
+            [(852, 548), (748, 508), (852, 468)],
+            fill=(*accent, 206),
+        )
+
+    shadow = shadow.filter(ImageFilter.GaussianBlur(20))
+    canvas.alpha_composite(shadow)
+    canvas.alpha_composite(foreground)
+    finishing = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    finish_draw = ImageDraw.Draw(finishing)
+    for index in range(10):
+        x = (seed * (index + 3) * 71) % width
+        y = (seed * (index + 7) * 43) % height
+        finish_draw.ellipse((x, y, x + 3, y + 3), fill=(*ink, 58))
+    finishing = finishing.filter(ImageFilter.GaussianBlur(0.6))
+    canvas.alpha_composite(finishing)
+
+    file_name = f"slide-{slide_index}-owned-explainer.png"
+    path = assets_dir / file_name
+    canvas.convert("RGB").save(path, format="PNG", optimize=True)
+    return VisualAsset(
+        slide_index=slide_index,
+        path=path,
+        rel_path=f"assets/{file_name}",
+        file_name=file_name,
+        mime_type="image/png",
+        source_type="owned_design_library",
+        alt=_asset_alt(slide_index, query),
+        query=query,
+        image_type=image_type,
+        purpose=purpose,
+        prompt=prompt,
+        provider_chain=provider_chain,
+        attribution=(
+            "HumanizePPT owned explanatory visual library / selected after open-web search because "
+            "this slide requires a semantic visual explanation rather than decorative stock photography"
+        ),
+        width=width,
+        height=height,
+        original_width=width,
+        original_height=height,
+    )
 
 
 def _write_local_visual_asset(

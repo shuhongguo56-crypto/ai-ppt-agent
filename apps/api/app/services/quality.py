@@ -1795,6 +1795,7 @@ def _visual_asset_source_quality(render_dir: Path, expected_slide_count: int) ->
         "openverse_search",
         "ai_fallback",
         "free_ai_fallback",
+        "owned_design_library",
     }
     for slide_index in range(1, expected_slide_count + 1):
         sidecar = assets_dir / f"slide-{slide_index}-asset.json"
