@@ -987,6 +987,14 @@ def _search_openverse_visual_asset(
             key=lambda item: _openverse_candidate_score(item, query),
             reverse=True,
         )
+        # Openverse ranks a broad visual set deterministically.  Rotate the
+        # relevant candidate pool by page so a repeated high-level subject
+        # (for example, several university-learning pages) does not select the
+        # same first thumbnail on every slide before the cross-slide hash gate
+        # gets an opportunity to repair it.
+        if ordered:
+            offset = (max(1, slide_index) - 1) % len(ordered)
+            ordered = ordered[offset:] + ordered[:offset]
         for item in ordered:
             if "modern" in query.casefold() and not _candidate_metadata_is_relevant(
                 str(item.get("title") or ""), query
