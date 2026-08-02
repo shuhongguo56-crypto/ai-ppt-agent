@@ -2277,8 +2277,12 @@ def _source_slide_title(
     elif _is_auto_research_ai_education_source(brief, source_profile):
         mapping = {
             "cover": "Generative AI in higher education",
-            "agenda": "Teaching, learning, assessment, governance",
-            "context": "Why AI changes the learning contract",
+            # Repeat the user's subject on the early content pages.  Apart from
+            # making the narrative instantly intelligible when the deck is
+            # printed or a slide is viewed in isolation, this keeps a research
+            # deck grounded in its actual scope rather than a generic AI story.
+            "agenda": "Generative AI across four university systems",
+            "context": "Higher education in the AI era",
             "framework": "Four design layers for trustworthy AI use",
             "evidence": "Evidence: process proof, not speed alone",
             "insight": "Insight: augment judgment, not answer substitution",
@@ -2358,8 +2362,8 @@ def _source_slide_key_point(
     elif _is_auto_research_ai_education_source(brief, source_profile):
         mapping = {
             "cover": "Generative AI should improve teaching, learning, assessment, and governance—not merely accelerate content production.",
-            "agenda": "Move from the learning problem to a practical design, evidence, and scale decision.",
-            "context": "Improve learning without outsourcing student reasoning or weakening academic integrity.",
+            "agenda": "Adopt generative AI across four systems, then set the evidence and scale gate.",
+            "context": "In higher education, protect reasoning and integrity.",
             "framework": "Design teaching, learning, assessment, and governance as one connected system.",
             "evidence": "Judge value with process evidence, feedback quality, and academic-integrity safeguards.",
             "insight": "The premium use of AI is guided practice and feedback—not answer substitution.",

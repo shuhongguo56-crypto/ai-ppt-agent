@@ -2104,6 +2104,7 @@ def _visible_copy_looks_truncated(value: str) -> bool:
         "vs",
         "web",
         "map",
+        "era",
         "new",
         "now",
         "how",

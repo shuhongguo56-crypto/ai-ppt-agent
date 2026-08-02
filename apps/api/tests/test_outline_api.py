@@ -329,6 +329,11 @@ def test_english_ai_education_research_uses_decision_ready_story_not_generic_act
         "Pilot one course before institutional scale",
         "Scale only when learning and integrity improve",
     ]
+    assert titles[1:4] == [
+        "Generative AI across four university systems",
+        "Higher education in the AI era",
+        "Four design layers for trustworthy AI use",
+    ]
     assert "translate the conclusion into steps" not in visible
     assert "one course owner" in visible
     assert "scale, redesign, or stop gate" in visible
