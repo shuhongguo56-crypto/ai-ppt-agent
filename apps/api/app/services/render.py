@@ -3715,6 +3715,10 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
       padding: 76px 4vw 46px;
       display: none;
       place-items: center;
+      /* Resolve foreground against this frame's palette.  Body-level color
+         inheritance resolves custom properties too early for dark per-slide
+         visual surfaces. */
+      color: var(--fg);
       animation: rise .34s ease both;
     }}
     .frame[data-active="true"] {{
