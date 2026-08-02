@@ -280,6 +280,34 @@ def test_supported_image_types_keep_semantic_subjects_and_no_text_contract() -> 
         assert "absolutely no visible text" in lowered
 
 
+def test_ai_higher_education_diagram_uses_a_concrete_academic_scene() -> None:
+    prompt = render_service._ai_image_generation_prompt(
+        slide_index=4,
+        query=(
+            "generative AI higher education teaching learning assessment governance "
+            "connected academic ecosystem"
+        ),
+        image_type="icon_illustration",
+        purpose="Explain four design layers for trustworthy AI use in a university.",
+        image_prompt="premium academic concept illustration, no labels or interface",
+        slide_title="Four design layers for trustworthy AI use",
+        slide_intent="Connect teaching, learning, assessment, and governance.",
+        asset_role="diagram",
+        image_treatment="masked_window",
+        composition_archetype="system_map",
+        direction_name="Research Journal",
+        palette=["#102A43", "#F4F1EA", "#CF8A4B"],
+    )
+    lowered = prompt.casefold()
+
+    assert prompt.startswith("Concrete semantic subject:")
+    assert "faculty workshop" in lowered
+    assert "abstract still life" not in lowered
+    for forbidden in ("interface", "chart", "screen", "device"):
+        assert forbidden in lowered  # Explicitly prohibited, never requested.
+    assert "absolutely no visible text" in lowered
+
+
 def create_renderable_deck(client) -> dict:
     assert client.post("/api/projects", json=PROJECT).status_code == 201
     outline = client.post("/api/projects/project-render/outline/generate", json={})

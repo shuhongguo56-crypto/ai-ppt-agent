@@ -378,6 +378,12 @@ def resolve_visual_assets(
                 composition_archetype=slide.design_plan.composition_archetype,
                 palette=deck.theme.palette,
             )
+        # Keep the source fingerprint as well as the delivery fingerprint.
+        # A prior slide may already have been upscaled, in which case comparing
+        # only its final PNG bytes lets the same downloaded JPEG slip onto a
+        # later page.  That produces visually duplicated pages despite a clean
+        # hash-based QA result.
+        source_hash = _visual_asset_hash(asset.path)
         asset = _upgrade_visual_asset_for_expert_delivery(
             asset,
             slide=slide,
@@ -398,6 +404,8 @@ def resolve_visual_assets(
         )
         _write_cached_visual_asset(asset, assets_dir)
         promote_asset(asset, shared_asset_library_path)
+        if source_hash:
+            seen_image_hashes.add(source_hash)
         seen_image_hashes.add(_visual_asset_hash(asset.path))
         assets[slide.slide_index] = asset
     return assets
@@ -1429,6 +1437,22 @@ def _ai_image_generation_prompt(
         purpose,
         semantic_queries[0] if semantic_queries else query,
     )
+    # A diagram-shaped page in an AI-in-education deck is still about people
+    # doing a specific piece of educational work.  Sending it through the
+    # generic glass-object safety route prevents pseudo-text, but also makes a
+    # free image provider return decorative bowls and blobs. Keep the no-text
+    # contract while putting a page-specific scene at the start of the prompt.
+    if _is_ai_education_content(semantic_cues):
+        return (
+            f"Concrete semantic subject: {semantic_subject}. "
+            "Create a premium cinematic 16:9 editorial photograph of this exact university scene, "
+            "with authentic people, physical learning materials, clear human interaction, and a decisive focal action. "
+            "The scene must visibly relate to responsible generative AI in higher education, rather than using abstract objects as a substitute. "
+            "ABSOLUTELY NO visible text, letters, numbers, screens, devices, interfaces, charts, logos, badges, watermarks, documents, labels, or pseudo-writing. "
+            "Use blank tactile materials only, with layered foreground, midground, and background, natural depth of field, and generous quiet negative space. "
+            f"Palette: {', '.join(palette)}. "
+            "Style: award-grade academic editorial photography, restrained, believable, and presentation-ready."
+        )
     if _is_text_risk_image_type(image_type) or _requires_text_safe_conclusion_visual(
         query,
         image_prompt,
@@ -1482,6 +1506,46 @@ def _requires_text_safe_conclusion_visual(*values: str) -> bool:
     )
 
 
+def _is_ai_education_content(value: str) -> bool:
+    """Identify education-specific AI work before broad visual safety routing.
+
+    A visual plan can label a framework page an ``icon_illustration`` while
+    its real subject is a faculty decision or a learning interaction.
+    """
+    lowered = value.casefold()
+    ai_markers = (
+        " ai ",
+        "artificial intelligence",
+        "generative ai",
+        "machine learning",
+        "large language model",
+        "llm",
+        "\u4eba\u5de5\u667a\u80fd",
+        "\u751f\u6210\u5f0f",
+    )
+    education_markers = (
+        "education",
+        "higher education",
+        "university",
+        "college",
+        "faculty",
+        "teaching",
+        "learning",
+        "assessment",
+        "academic integrity",
+        "course",
+        "\u6559\u80b2",
+        "\u9ad8\u6821",
+        "\u5927\u5b66",
+        "\u6559\u5b66",
+        "\u5b66\u4e60",
+        "\u8bfe\u7a0b",
+    )
+    return any(marker in lowered for marker in ai_markers) and any(
+        marker in lowered for marker in education_markers
+    )
+
+
 def _ai_semantic_subject(cues: str, purpose: str, fallback: str) -> str:
     lowered = cues.casefold()
     ai_education = (
@@ -1505,7 +1569,7 @@ def _ai_semantic_subject(cues: str, purpose: str, fallback: str) -> str:
             )
         )
     )
-    if ai_education:
+    if _is_ai_education_content(lowered):
         education_scenes = {
             "cover": "a university seminar with faculty and diverse students discussing responsible generative AI adoption around a clean shared table",
             "agenda": "four connected university learning spaces represented by faculty and students moving between seminar, tutorial, assessment, and governance review",
@@ -1516,7 +1580,8 @@ def _ai_semantic_subject(cues: str, purpose: str, fallback: str) -> str:
             "recommendation": "a small faculty team planning a one-term responsible AI course pilot with clear ownership and review moments",
             "conclusion": "a university leadership review at the end of a pilot, with people choosing a careful scale, redesign, or stop path",
         }
-        return education_scenes.get(purpose, fallback)
+        page_job = _ai_education_page_job(lowered)
+        return education_scenes.get(page_job or purpose, fallback)
     enterprise_ai = (
         any(marker in lowered for marker in ("enterprise", "business", "organization", "企业", "业务", "组织"))
         and any(marker in lowered for marker in (" ai ", "artificial intelligence", "agent", "agentic", "人工智能", "智能体"))
@@ -1554,6 +1619,88 @@ def _ai_semantic_subject(cues: str, purpose: str, fallback: str) -> str:
         "conclusion": "a future-ready electric vehicle on an open road at sunrise",
     }
     return electric_vehicle_scenes.get(purpose, fallback)
+
+
+def _ai_education_page_job(lowered: str) -> str | None:
+    """Resolve a university-AI image beat from concrete slide cues.
+
+    Image-plan purposes are full sentences, not the short internal page-role
+    tokens used by the scene dictionary.  Map the evidence-bearing language
+    before falling back, so a framework slide cannot silently become a generic
+    classroom photo.
+    """
+    if any(
+        marker in lowered
+        for marker in (
+            "scale only when",
+            "scale only after",
+            "leadership review",
+            "expand only when",
+        )
+    ):
+        return "conclusion"
+    if any(
+        marker in lowered
+        for marker in (
+            "one-term",
+            "one term",
+            "course pilot",
+            "pilot one",
+            "implementation priority",
+        )
+    ):
+        return "recommendation"
+    if any(
+        marker in lowered
+        for marker in (
+            "guided practice",
+            "guided feedback",
+            "augment judgment",
+            "answer substitution",
+        )
+    ):
+        return "insight"
+    if any(
+        marker in lowered
+        for marker in (
+            "process proof",
+            "feedback quality",
+            "academic-integrity",
+            "academic integrity",
+            "evidence:",
+        )
+    ):
+        return "evidence"
+    if any(
+        marker in lowered
+        for marker in (
+            "four design layers",
+            "teaching, learning, assessment, and governance",
+            "connected academic ecosystem",
+            "trustworthy ai use",
+        )
+    ):
+        return "framework"
+    if any(
+        marker in lowered
+        for marker in (
+            "ai era",
+            "human guidance",
+            "reasoning and integrity",
+        )
+    ):
+        return "context"
+    if any(
+        marker in lowered
+        for marker in (
+            "four university systems",
+            "across four university",
+        )
+    ):
+        return "agenda"
+    if "hero content" in lowered or "generative ai in higher education" in lowered:
+        return "cover"
+    return None
 
 
 def _enterprise_ai_page_job(lowered: str) -> str | None:
