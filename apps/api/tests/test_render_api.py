@@ -359,6 +359,11 @@ def test_owned_explainer_visual_is_a_delivery_safe_raster_asset(tmp_path) -> Non
     assert render_service.raster_dimensions(asset.path) == (1600, 900)
     assert render_service._uses_owned_explainer_visual("data_visual", expert_mode=True)
     assert not render_service._uses_owned_explainer_visual("business_scene", expert_mode=True)
+    assert render_service._uses_owned_explainer_visual(
+        "course_review_atmosphere",
+        expert_mode=True,
+        semantic_cues="generative AI adoption in higher education",
+    )
 
 
 def test_owned_explainer_page_skips_wasted_free_image_generation(tmp_path) -> None:

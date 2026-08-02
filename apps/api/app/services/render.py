@@ -244,9 +244,18 @@ def resolve_visual_assets(
         # Diagram and concept pages still try the open-web search, but do not
         # spend a slow free-image request on a photograph we will intentionally
         # replace with the owned explanatory visual below.
+        visual_cues = (
+            f"{getattr(deck, 'title', '')} {slide.title} "
+            f"{image_item.search_query} {image_item.purpose}"
+        )
+        use_owned_visual = _uses_owned_explainer_visual(
+            image_item.image_type,
+            expert_mode=expert_mode,
+            semantic_cues=visual_cues,
+        )
         candidate_gateway = (
             None
-            if _uses_owned_explainer_visual(image_item.image_type, expert_mode=expert_mode)
+            if use_owned_visual
             else image_gateway
         )
         asset = _resolve_visual_asset_candidate(
@@ -285,6 +294,10 @@ def resolve_visual_assets(
                 and not _uses_owned_explainer_visual(
                     image_plan_by_slide[slide.slide_index].image_type,
                     expert_mode=expert_mode,
+                    semantic_cues=(
+                        f"{getattr(deck, 'title', '')} {slide.title} "
+                        f"{image_plan_by_slide[slide.slide_index].search_query}"
+                    ),
                 )
             ]
             if not missing_slides:
@@ -394,7 +407,14 @@ def resolve_visual_assets(
                 composition_archetype=slide.design_plan.composition_archetype,
                 palette=deck.theme.palette,
             )
-        if _uses_owned_explainer_visual(image_item.image_type, expert_mode=expert_mode):
+        if _uses_owned_explainer_visual(
+            image_item.image_type,
+            expert_mode=expert_mode,
+            semantic_cues=(
+                f"{getattr(deck, 'title', '')} {slide.title} "
+                f"{image_item.search_query} {image_item.purpose}"
+            ),
+        ):
             # Stock photos are a poor explanation for a framework, evidence, or
             # insight page.  The open-web search has still run above, but this
             # page class benefits from our owned, no-text explanatory visual
@@ -2083,17 +2103,30 @@ def _safe_ai_image_subject(slide_title: str, slide_intent: str, purpose: str) ->
     return _clip_for_asset(raw, 180)
 
 
-def _uses_owned_explainer_visual(image_type: str, *, expert_mode: bool) -> bool:
+def _uses_owned_explainer_visual(
+    image_type: str,
+    *,
+    expert_mode: bool,
+    semantic_cues: str = "",
+) -> bool:
     """Use an owned explanatory image where a stock photograph is misleading.
 
     These are not placeholder backgrounds.  They are page-specific visual
     explanations for frameworks, evidence and conceptual insight pages.  The
     preceding web-search pass remains useful for photograph-led slide types.
     """
-    return expert_mode and image_type in {
-        "icon_illustration",
-        "data_visual",
-        "thesis_concept",
+    if not expert_mode:
+        return False
+    if image_type in {"icon_illustration", "data_visual", "thesis_concept"}:
+        return True
+    # A no-key free image provider is not reliable enough to represent a
+    # responsible-AI teaching scenario with real people.  Prefer a clear
+    # owned visual system over an empty classroom or a decorative object; this
+    # branch remains narrowly scoped to this research narrative.
+    return _is_ai_education_content(semantic_cues) and image_type in {
+        "background",
+        "course_review_atmosphere",
+        "business_scene",
     }
 
 
@@ -2194,7 +2227,22 @@ def _write_owned_explainer_visual_asset(
             fill=(*ink, 34),
         )
 
-    if image_type == "icon_illustration":
+    if image_type in {"background", "course_review_atmosphere", "business_scene"}:
+        table_box = (430, 270, 1170, 666)
+        shadow_draw.ellipse(
+            (table_box[0] + 14, table_box[1] + 26, table_box[2] + 14, table_box[3] + 26),
+            fill=(0, 0, 0, 114),
+        )
+        draw.ellipse(table_box, fill=(*ink, 42), outline=(*ink, 120), width=3)
+        for index, (center_x, center_y) in enumerate(
+            ((510, 274), (800, 186), (1090, 274), (1120, 634), (800, 724), (480, 634))
+        ):
+            node(center_x, center_y, 50, accent if index % 2 == 0 else support)
+            draw.line((center_x, center_y, 800, 470), fill=(*ink, 55), width=4)
+        rounded_box((680, 386, 920, 548), (*accent, 172), 38)
+        for center_x, center_y in ((742, 468), (800, 468), (858, 468)):
+            node(center_x, center_y, 18, ink)
+    elif image_type == "icon_illustration":
         variants = [
             [(320, 254), (765, 190), (1210, 314), (780, 662)],
             [(302, 500), (628, 246), (996, 274), (1280, 570)],
