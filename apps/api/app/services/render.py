@@ -2169,6 +2169,58 @@ def _image_search_queries(query: str, image_type: str) -> list[str]:
 
 def _cross_language_image_queries(query: str, image_type: str) -> list[str]:
     lowered = query.casefold()
+    if _is_ai_education_content(lowered):
+        page_job = _ai_education_page_job(lowered)
+        education_queries = {
+            "cover": [
+                "university seminar faculty students discussion",
+                "higher education faculty student workshop",
+                "university classroom collaborative learning",
+            ],
+            "agenda": [
+                "university teaching and learning workshop",
+                "faculty curriculum planning workshop",
+                "students university tutorial discussion",
+            ],
+            "context": [
+                "teacher students learning task discussion",
+                "university instructor student tutorial",
+                "higher education guided learning classroom",
+            ],
+            "framework": [
+                "university faculty workshop collaborative planning",
+                "higher education teaching learning workshop",
+                "faculty discussion university seminar room",
+            ],
+            "evidence": [
+                "university student feedback tutorial",
+                "teacher student oral assessment discussion",
+                "higher education learning review meeting",
+            ],
+            "insight": [
+                "student instructor feedback university studio",
+                "university guided practice tutorial",
+                "teacher student reflection conversation",
+            ],
+            "recommendation": [
+                "university faculty course planning meeting",
+                "higher education teaching team workshop",
+                "faculty curriculum design workshop",
+            ],
+            "conclusion": [
+                "university leadership academic planning meeting",
+                "faculty leadership review workshop",
+                "higher education governance discussion",
+            ],
+        }
+        return education_queries.get(
+            page_job,
+            [
+                "university faculty students collaborative learning",
+                "higher education teaching workshop",
+                "university classroom discussion",
+            ],
+        )
     enterprise_ai = (
         any(marker in lowered for marker in ("enterprise", "business", "organization", "企业", "业务", "组织"))
         and any(marker in lowered for marker in (" ai ", "artificial intelligence", "agent", "agentic", "人工智能", "智能体"))

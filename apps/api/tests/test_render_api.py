@@ -308,6 +308,18 @@ def test_ai_higher_education_diagram_uses_a_concrete_academic_scene() -> None:
     assert "absolutely no visible text" in lowered
 
 
+def test_ai_higher_education_search_queries_follow_the_slide_story_beat() -> None:
+    queries = render_service._cross_language_image_queries(
+        "generative AI higher education teaching learning assessment governance "
+        "connected academic ecosystem",
+        "icon_illustration",
+    )
+
+    assert queries[0] == "university faculty workshop collaborative planning"
+    assert all("university" in query or "higher education" in query for query in queries)
+    assert "artificial intelligence research" not in queries
+
+
 def create_renderable_deck(client) -> dict:
     assert client.post("/api/projects", json=PROJECT).status_code == 201
     outline = client.post("/api/projects/project-render/outline/generate", json={})
