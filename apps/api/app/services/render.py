@@ -640,15 +640,18 @@ def _read_cached_visual_asset(
         return None
     file_name = str(data.get("fileName") or "")
     source_type = str(data.get("sourceType") or "cached_visual_asset")
-    if source_type in {"local_svg_fallback", "safe_vector_fallback", "local_deterministic_image"}:
+    if source_type in {
+        "local_svg_fallback",
+        "safe_vector_fallback",
+        "local_deterministic_image",
+        "owned_design_library",
+        "free_ai_fallback",
+    }:
         return None
-    if source_type == "owned_design_library":
-        # An older render may have used the owned graphic because the prior
-        # image search was too impatient or was intentionally bypassed.  Do not
-        # let that fallback become a permanent cache hit now that the
-        # photo-first pipeline is available; a fresh run should have a chance
-        # to upgrade it to a licensed or configured generated visual.
-        return None
+    # An older generated or owned fallback may have been accepted only because
+    # the previous image search was too impatient.  Do not let it become a
+    # permanent cache hit now that the photo-first pipeline is available; a
+    # fresh render should have a chance to upgrade it to a licensed visual.
     cached_query = str(data.get("query") or "")
     cached_attribution = str(data.get("attribution") or "")
     generic_queries = {
@@ -771,6 +774,13 @@ def _upgrade_visual_asset_for_expert_delivery(
         "closing_echo",
     }
     requirement = key_requirement if key_page else normal_requirement
+    # Free image endpoints frequently return a genuine 1024px raster but not a
+    # faithful input for tiled neural upscalers.  Real-ESRGAN can then create
+    # the visible 2x2/4x4 seams that make a slide look broken.  A clean Lanczos
+    # delivery resize retains the original composition, while premium BYOK and
+    # licensed photographs can still use the configured enhancement path.
+    if asset.source_type in {"ai_fallback", "free_ai_fallback"}:
+        return _resize_visual_asset_for_delivery(asset, requirement)
     if meets_resolution(dimensions, requirement):
         return replace(
             asset,
@@ -809,6 +819,63 @@ def _upgrade_visual_asset_for_expert_delivery(
         attribution=f"{attribution} / enhanced locally with Real-ESRGAN",
         width=width,
         height=height,
+        original_width=original_width,
+        original_height=original_height,
+        upscaled=True,
+        resolution_profile=requirement.label,
+    )
+
+
+def _resize_visual_asset_for_delivery(
+    asset: VisualAsset,
+    requirement: ImageResolutionRequirement,
+) -> VisualAsset:
+    """Scale a generated raster without introducing neural-upscaler seams."""
+
+    dimensions = raster_dimensions(asset.path)
+    if dimensions is None:
+        return asset
+    original_width, original_height = dimensions
+    if meets_resolution(dimensions, requirement):
+        return replace(
+            asset,
+            width=original_width,
+            height=original_height,
+            original_width=original_width,
+            original_height=original_height,
+            resolution_profile=requirement.label,
+        )
+    scale = max(
+        requirement.min_long_edge / max(original_width, original_height),
+        requirement.min_short_edge / min(original_width, original_height),
+    )
+    target_width = max(original_width, round(original_width * scale))
+    target_height = max(original_height, round(original_height * scale))
+    destination = asset.path.with_name(f"slide-{asset.slide_index}-delivery.png")
+    try:
+        with Image.open(asset.path) as source:
+            source.convert("RGB").resize(
+                (target_width, target_height),
+                Image.Resampling.LANCZOS,
+            ).save(destination, format="PNG", optimize=True)
+    except (OSError, ValueError):
+        return replace(
+            asset,
+            width=original_width,
+            height=original_height,
+            original_width=original_width,
+            original_height=original_height,
+            resolution_profile=requirement.label,
+        )
+    return replace(
+        asset,
+        path=destination,
+        rel_path=f"assets/{destination.name}",
+        file_name=destination.name,
+        mime_type="image/png",
+        attribution=f"{asset.attribution or 'Generated visual'} / scaled locally without neural reconstruction",
+        width=target_width,
+        height=target_height,
         original_width=original_width,
         original_height=original_height,
         upscaled=True,
@@ -2698,44 +2765,44 @@ def _cross_language_image_queries(query: str, image_type: str) -> list[str]:
         page_job = _ai_education_page_job(lowered)
         education_queries = {
             "cover": [
-                "university seminar faculty students discussion",
-                "higher education faculty student workshop",
-                "university classroom collaborative learning",
+                "university students seminar",
+                "university classroom discussion",
+                "college students workshop",
             ],
             "agenda": [
-                "university teaching and learning workshop",
-                "faculty curriculum planning workshop",
-                "students university tutorial discussion",
+                "university teaching workshop",
+                "university students seminar",
+                "university classroom discussion",
             ],
             "context": [
-                "teacher students learning task discussion",
-                "university instructor student tutorial",
-                "higher education guided learning classroom",
+                "university students discussion",
+                "university classroom",
+                "university students seminar",
             ],
             "framework": [
-                "university faculty workshop collaborative planning",
-                "higher education teaching learning workshop",
-                "faculty discussion university seminar room",
+                "university faculty workshop",
+                "university students seminar",
+                "university teaching workshop",
             ],
             "evidence": [
-                "university student feedback tutorial",
-                "teacher student oral assessment discussion",
-                "higher education learning review meeting",
+                "university students seminar",
+                "university teaching workshop",
+                "university student discussion",
             ],
             "insight": [
-                "student instructor feedback university studio",
-                "university guided practice tutorial",
-                "teacher student reflection conversation",
+                "university students discussion",
+                "university students seminar",
+                "university classroom discussion",
             ],
             "recommendation": [
-                "university faculty course planning meeting",
-                "higher education teaching team workshop",
-                "faculty curriculum design workshop",
+                "university faculty workshop",
+                "university teaching workshop",
+                "university students seminar",
             ],
             "conclusion": [
-                "university leadership academic planning meeting",
-                "faculty leadership review workshop",
-                "higher education governance discussion",
+                "university faculty meeting",
+                "university students seminar",
+                "university teaching workshop",
             ],
         }
         return education_queries.get(
@@ -4944,7 +5011,7 @@ def _cinematic_backdrop_shapes(
             reading_cx,
             reading_cy,
             bg,
-            76000,
+            54000,
             name=f"Localized Reading Zone {placement.gravity}",
         )
     treatment_visual = _treatment_pic_shape(slide, visual_asset)

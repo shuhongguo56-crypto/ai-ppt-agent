@@ -6,6 +6,8 @@ import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
+from PIL import Image
+
 from app.ai.models import GeneratedImage
 from app.services import render as render_service
 from app.services.render import SLIDE_CX, SLIDE_CY, _clean_visible_text, _compact_render_block_text
@@ -315,7 +317,7 @@ def test_ai_higher_education_search_queries_follow_the_slide_story_beat() -> Non
         "icon_illustration",
     )
 
-    assert queries[0] == "university faculty workshop collaborative planning"
+    assert queries[0] == "university faculty workshop"
     assert all("university" in query or "higher education" in query for query in queries)
     assert "artificial intelligence research" not in queries
 
@@ -416,6 +418,34 @@ def test_owned_explainer_visual_is_last_resort_after_image_generation(tmp_path) 
 
     assert gateway.calls > 0
     assert assets[1].source_type == "owned_design_library"
+
+
+def test_free_generated_visual_uses_clean_delivery_resize_not_neural_upscale(tmp_path) -> None:
+    source = tmp_path / "slide-2-ai.jpg"
+    Image.new("RGB", (1024, 576), "#43607A").save(source, format="JPEG")
+    asset = render_service.VisualAsset(
+        slide_index=2,
+        path=source,
+        rel_path="assets/slide-2-ai.jpg",
+        file_name=source.name,
+        mime_type="image/jpeg",
+        source_type="free_ai_fallback",
+        alt="Slide 2 visual",
+        query="university workshop",
+        image_type="course_review_atmosphere",
+        purpose="Show a university workshop",
+        prompt="premium workshop photograph",
+        provider_chain=["Pollinations"],
+    )
+
+    resized = render_service._resize_visual_asset_for_delivery(
+        asset,
+        render_service.EXPERT_PAGE_RESOLUTION,
+    )
+
+    assert resized.file_name == "slide-2-delivery.png"
+    assert resized.source_type == "free_ai_fallback"
+    assert render_service.raster_dimensions(resized.path) == (1920, 1080)
 
 
 def create_renderable_deck(client) -> dict:
