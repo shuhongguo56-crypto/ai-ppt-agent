@@ -241,12 +241,20 @@ def resolve_visual_assets(
 
     def resolve_candidate(slide) -> tuple[int, VisualAsset | None]:
         image_item = image_plan_by_slide[slide.slide_index]
+        # Diagram and concept pages still try the open-web search, but do not
+        # spend a slow free-image request on a photograph we will intentionally
+        # replace with the owned explanatory visual below.
+        candidate_gateway = (
+            None
+            if _uses_owned_explainer_visual(image_item.image_type, expert_mode=expert_mode)
+            else image_gateway
+        )
         asset = _resolve_visual_asset_candidate(
             slide,
             image_item,
             deck,
             assets_dir,
-            image_gateway,
+            candidate_gateway,
             mode=mode,
             image_search_enabled=image_search_enabled,
             image_search_timeout_seconds=image_search_timeout_seconds,
@@ -271,7 +279,13 @@ def resolve_visual_assets(
         retry_rounds = _image_generation_retry_rounds()
         for retry_round in range(1, retry_rounds + 1):
             missing_slides = [
-                slide for slide in deck.slides if candidate_assets.get(slide.slide_index) is None
+                slide
+                for slide in deck.slides
+                if candidate_assets.get(slide.slide_index) is None
+                and not _uses_owned_explainer_visual(
+                    image_plan_by_slide[slide.slide_index].image_type,
+                    expert_mode=expert_mode,
+                )
             ]
             if not missing_slides:
                 break

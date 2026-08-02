@@ -361,6 +361,54 @@ def test_owned_explainer_visual_is_a_delivery_safe_raster_asset(tmp_path) -> Non
     assert not render_service._uses_owned_explainer_visual("business_scene", expert_mode=True)
 
 
+def test_owned_explainer_page_skips_wasted_free_image_generation(tmp_path) -> None:
+    class NoCallImageGateway:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate(self, _request):
+            self.calls += 1
+            raise AssertionError("owned explainer page should not invoke the free image provider")
+
+    slide = SimpleNamespace(
+        slide_index=1,
+        title="Four design layers",
+        visual_intent="Connect teaching, learning, assessment, and governance.",
+        design_plan=SimpleNamespace(
+            asset_role="diagram",
+            image_treatment="masked_window",
+            composition_archetype="system_map",
+        ),
+    )
+    image_plan = SimpleNamespace(
+        slide=1,
+        search_query="generative AI higher education connected academic ecosystem",
+        image_type="icon_illustration",
+        purpose="Explain the four design layers.",
+        prompt="semantic framework visual",
+        provider_chain=["open_web_search", "HumanizePPT owned visual library"],
+    )
+    gateway = NoCallImageGateway()
+    deck = SimpleNamespace(
+        slides=[slide],
+        image_plan=[image_plan],
+        theme=SimpleNamespace(name="Research Journal", palette=["#102A43", "#F4F1EA", "#CF8A4B"]),
+    )
+
+    assets = render_service.resolve_visual_assets(
+        deck,
+        tmp_path,
+        gateway,
+        mode="generate",
+        image_search_enabled=False,
+        expert_mode=True,
+        realesrgan_executable=None,
+    )
+
+    assert gateway.calls == 0
+    assert assets[1].source_type == "owned_design_library"
+
+
 def create_renderable_deck(client) -> dict:
     assert client.post("/api/projects", json=PROJECT).status_code == 201
     outline = client.post("/api/projects/project-render/outline/generate", json={})
