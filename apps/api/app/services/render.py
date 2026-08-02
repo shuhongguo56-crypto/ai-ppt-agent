@@ -343,6 +343,12 @@ def resolve_visual_assets(
     for slide in deck.slides:
         image_item = image_plan_by_slide[slide.slide_index]
         query = image_item.search_query
+        # The owned visual library has to inherit the *page* palette rather
+        # than the direction-level palette.  Anchor pages use dark faces while
+        # evidence pages use paper faces; passing the direction palette here
+        # was the reason a pale illustration could be dropped into a dark
+        # cover and feel pasted on.
+        page_palette = list(_slide_visual_palette(deck.theme.palette, slide)[:4])
         asset = candidate_assets.get(slide.slide_index)
         if asset is not None and _visual_asset_hash(asset.path) in seen_image_hashes:
             # A searched or generated image can be returned for multiple pages by an
@@ -405,7 +411,7 @@ def resolve_visual_assets(
                 slide_intent=slide.visual_intent,
                 image_treatment=slide.design_plan.image_treatment,
                 composition_archetype=slide.design_plan.composition_archetype,
-                palette=deck.theme.palette,
+                palette=page_palette,
             )
         if _uses_owned_explainer_visual(
             image_item.image_type,
@@ -431,7 +437,7 @@ def resolve_visual_assets(
                 slide_title=slide.title,
                 slide_intent=slide.visual_intent,
                 composition_archetype=slide.design_plan.composition_archetype,
-                palette=deck.theme.palette,
+                palette=page_palette,
             )
         # Keep the source fingerprint as well as the delivery fingerprint.
         # A prior slide may already have been upscaled, in which case comparing
@@ -2164,6 +2170,23 @@ def _write_owned_explainer_visual_asset(
     ink = rgb(palette[1] if len(palette) > 1 else "", (243, 240, 232))
     accent = rgb(palette[2] if len(palette) > 2 else "", (207, 138, 75))
     support = rgb(palette[3] if len(palette) > 3 else "", (70, 123, 165))
+    # Hero / closing surfaces are rendered dark by the PPTX renderer.  Keep a
+    # matching image base even when a direction-level palette happens to be
+    # light, otherwise a rectangular white image looks pasted onto the page.
+    if composition_archetype in {
+        "cinematic_hero",
+        "editorial_cover",
+        "architectural_cover",
+        "statement_focus",
+        "closing_bloom",
+        "closing_echo",
+        "future_horizon",
+        "manifesto_close",
+    }:
+        bg = (28, 31, 40)
+        ink = (244, 241, 235)
+        accent = tuple(round(channel * 0.66 + 255 * 0.34) for channel in accent)
+        support = tuple(round(channel * 0.58 + accent[index] * 0.42) for index, channel in enumerate(support))
     seed = int.from_bytes(
         hashlib.sha256(
             f"{slide_index}|{query}|{purpose}|{composition_archetype}".encode("utf-8")
@@ -2227,78 +2250,219 @@ def _write_owned_explainer_visual_asset(
             fill=(*ink, 34),
         )
 
-    if image_type in {"background", "course_review_atmosphere", "business_scene"}:
-        table_box = (430, 270, 1170, 666)
-        shadow_draw.ellipse(
-            (table_box[0] + 14, table_box[1] + 26, table_box[2] + 14, table_box[3] + 26),
-            fill=(0, 0, 0, 114),
+    def blend(
+        first: tuple[int, int, int], second: tuple[int, int, int], weight: float
+    ) -> tuple[int, int, int]:
+        weight = max(0.0, min(1.0, weight))
+        return tuple(
+            round(left * (1.0 - weight) + right * weight)
+            for left, right in zip(first, second)
         )
-        draw.ellipse(table_box, fill=(*ink, 42), outline=(*ink, 120), width=3)
-        for index, (center_x, center_y) in enumerate(
-            ((510, 274), (800, 186), (1090, 274), (1120, 634), (800, 724), (480, 634))
+
+    def person(center_x: int, baseline_y: int, scale: float, color: tuple[int, int, int]) -> None:
+        """A deliberately abstract learner silhouette, never a mascot/robot."""
+        head = max(12, round(22 * scale))
+        body_w = max(20, round(38 * scale))
+        body_h = max(42, round(72 * scale))
+        shadow_draw.ellipse(
+            (
+                center_x - body_w // 2 + 8,
+                baseline_y - body_h + 10,
+                center_x + body_w // 2 + 8,
+                baseline_y + 11,
+            ),
+            fill=(0, 0, 0, 96),
+        )
+        draw.ellipse(
+            (center_x - head, baseline_y - body_h - head * 2, center_x + head, baseline_y - body_h),
+            fill=(*color, 230),
+        )
+        draw.rounded_rectangle(
+            (center_x - body_w // 2, baseline_y - body_h, center_x + body_w // 2, baseline_y),
+            radius=body_w // 2,
+            fill=(*color, 204),
+        )
+
+    def glass_panel(
+        box: tuple[int, int, int, int],
+        color: tuple[int, int, int],
+        *,
+        radius: int = 32,
+        alpha: int = 138,
+    ) -> None:
+        rounded_box(box, (*color, alpha), radius)
+        inset = 12
+        draw.rounded_rectangle(
+            (box[0] + inset, box[1] + inset, box[2] - inset, box[3] - inset),
+            radius=max(12, radius - inset),
+            outline=(*ink, 42),
+            width=1,
+        )
+
+    surface = blend(bg, ink, 0.16)
+    surface_soft = blend(bg, support, 0.30)
+    highlight = blend(ink, (255, 255, 255), 0.34)
+
+    if image_type in {"background", "course_review_atmosphere", "business_scene"}:
+        # Academic studio: an open research book, learning tiers and abstract
+        # people make the scene recognisably educational without fabricating
+        # a screen, a document, pseudo-type or a cartoon robot.
+        variation = (seed + slide_index * 17) % 3
+        for row, (left, top, right) in enumerate(
+            ((206, 650, 1394), (290, 578, 1310), (390, 512, 1210))
         ):
-            node(center_x, center_y, 50, accent if index % 2 == 0 else support)
-            draw.line((center_x, center_y, 800, 470), fill=(*ink, 55), width=4)
-        rounded_box((680, 386, 920, 548), (*accent, 172), 38)
-        for center_x, center_y in ((742, 468), (800, 468), (858, 468)):
-            node(center_x, center_y, 18, ink)
+            shade = blend(surface, accent if (row + variation) % 2 else support, 0.18)
+            draw.rounded_rectangle(
+                (left, top, right, top + 52),
+                radius=26,
+                fill=(*shade, 158),
+                outline=(*highlight, 34),
+                width=2,
+            )
+        if variation == 0:
+            left_page = [(494, 350), (786, 300), (786, 572), (494, 622)]
+            right_page = [(786, 300), (1090, 352), (1090, 626), (786, 572)]
+            shadow_draw.polygon([(x + 16, y + 22) for x, y in left_page], fill=(0, 0, 0, 105))
+            shadow_draw.polygon([(x + 16, y + 22) for x, y in right_page], fill=(0, 0, 0, 105))
+            draw.polygon(left_page, fill=(*surface_soft, 224), outline=(*highlight, 72))
+            draw.polygon(right_page, fill=(*blend(surface_soft, accent, 0.18), 224), outline=(*highlight, 72))
+            draw.line((786, 302, 786, 572), fill=(*highlight, 92), width=4)
+            for offset in (0, 1, 2):
+                draw.line(
+                    (558, 422 + offset * 44, 718, 392 + offset * 37),
+                    fill=(*highlight, 44),
+                    width=4,
+                )
+                draw.line(
+                    (854, 392 + offset * 37, 1016, 424 + offset * 43),
+                    fill=(*highlight, 44),
+                    width=4,
+                )
+        elif variation == 1:
+            glass_panel((518, 248, 1084, 526), surface_soft, radius=76, alpha=132)
+            for index, x in enumerate((628, 800, 972)):
+                draw.ellipse(
+                    (x - 58, 326 - index * 18, x + 58, 442 - index * 18),
+                    fill=(*(accent if index == 1 else support), 184),
+                    outline=(*highlight, 70),
+                    width=2,
+                )
+                draw.line((x, 454 - index * 18, x, 510), fill=(*highlight, 64), width=5)
+        else:
+            for index, (left, top, right, bottom) in enumerate(
+                ((402, 486, 704, 596), (654, 388, 972, 498), (924, 290, 1250, 400))
+            ):
+                glass_panel(
+                    (left, top, right, bottom),
+                    accent if index == 2 else surface_soft,
+                    radius=26,
+                    alpha=154,
+                )
+                draw.ellipse(
+                    (left + 34, top + 28, left + 76, top + 70),
+                    fill=(*highlight, 116),
+                )
+        for index, (center_x, baseline, scale) in enumerate(
+            ((356, 620, 0.78), (474, 584, 0.60), (1136, 586, 0.68), (1264, 634, 0.86))
+        ):
+            person(center_x, baseline, scale, accent if index in {0, 3} else support)
     elif image_type == "icon_illustration":
+        # Four framed modules resolve into a single knowledge system.  It is a
+        # visual explanation for a framework page, not decoration.
         variants = [
-            [(320, 254), (765, 190), (1210, 314), (780, 662)],
-            [(302, 500), (628, 246), (996, 274), (1280, 570)],
-            [(368, 232), (1130, 214), (1128, 662), (382, 682)],
+            [(232, 214), (946, 168), (1052, 544), (314, 588)],
+            [(254, 326), (724, 154), (1114, 348), (712, 618)],
+            [(338, 176), (1004, 246), (962, 612), (292, 540)],
         ]
         points = variants[(slide_index + seed) % len(variants)]
-        center = (800, 450)
-        for point in points:
-            draw.line((center, point), fill=(*accent, 118), width=8)
-            draw.line((center, point), fill=(*ink, 42), width=2)
-        node(*center, 108, accent)
+        center = (800, 442)
         for index, point in enumerate(points):
-            rounded_box(
-                (point[0] - 116, point[1] - 76, point[0] + 116, point[1] + 76),
-                (*(support if index % 2 else accent), 164),
-                34,
+            node_color = accent if index in {0, 2} else support
+            draw.line((center, point), fill=(*node_color, 136), width=8)
+            draw.line((center, point), fill=(*highlight, 48), width=2)
+            glass_panel(
+                (point[0] - 122, point[1] - 78, point[0] + 122, point[1] + 78),
+                node_color,
+                radius=32,
+                alpha=144,
             )
-            node(point[0], point[1], 28, ink if index % 2 else support)
-    elif image_type == "data_visual":
-        baseline = 690
-        columns = [(300, 290), (640, 450), (980, 360), (1320, 580)]
-        for index, (center_x, top_y) in enumerate(columns):
-            column_width = 132
-            rounded_box(
-                (center_x - column_width // 2, top_y, center_x + column_width // 2, baseline),
-                (*(support if index in {1, 3} else accent), 172),
-                34,
+            draw.ellipse(
+                (point[0] - 30, point[1] - 30, point[0] + 30, point[1] + 30),
+                fill=(*highlight, 142),
             )
-            node(center_x, top_y, 33, ink if index % 2 else accent)
-        points = [(x, y - 34) for x, y in columns]
-        draw.line(points, fill=(*ink, 150), width=11, joint="curve")
-        draw.line(points, fill=(*accent, 214), width=4, joint="curve")
-        for point in points:
-            node(*point, 20, ink)
-    else:
-        left_box = (246, 224, 748, 676)
-        right_box = (852, 224, 1354, 676)
-        rounded_box(left_box, (*support, 152), 58)
-        rounded_box(right_box, (*accent, 152), 58)
-        for index, center in enumerate(((496, 450), (1104, 450))):
-            node(*center, 96, accent if index == 0 else support)
             draw.arc(
-                (center[0] - 142, center[1] - 142, center[0] + 142, center[1] + 142),
-                start=34 + index * 180,
-                end=274 + index * 180,
-                fill=(*ink, 176),
-                width=9,
+                (point[0] - 64, point[1] - 64, point[0] + 64, point[1] + 64),
+                start=30 + index * 62,
+                end=184 + index * 62,
+                fill=(*node_color, 210),
+                width=6,
             )
-        draw.polygon(
-            [(748, 410), (852, 450), (748, 490)],
-            fill=(*ink, 176),
+        draw.ellipse((center[0] - 118, center[1] - 118, center[0] + 118, center[1] + 118), fill=(*surface, 230))
+        draw.ellipse((center[0] - 86, center[1] - 86, center[0] + 86, center[1] + 86), fill=(*accent, 190))
+        draw.arc(
+            (center[0] - 58, center[1] - 58, center[0] + 58, center[1] + 58),
+            start=26,
+            end=316,
+            fill=(*highlight, 185),
+            width=8,
         )
-        draw.polygon(
-            [(852, 548), (748, 508), (852, 468)],
-            fill=(*accent, 206),
-        )
+    elif image_type == "data_visual":
+        # Evidence pages get a tangible measurement field: four distinct
+        # process signals and one rising assurance path.  No fake chart text.
+        baseline = 696
+        columns = [(318, 472), (628, 356), (938, 422), (1248, 266)]
+        for index, (center_x, top_y) in enumerate(columns):
+            column_width = 148
+            glass_panel(
+                (center_x - column_width // 2, top_y, center_x + column_width // 2, baseline),
+                accent if index in {1, 3} else support,
+                radius=36,
+                alpha=160,
+            )
+            draw.rounded_rectangle(
+                (center_x - 42, top_y + 34, center_x + 42, top_y + 76),
+                radius=20,
+                fill=(*highlight, 88),
+            )
+            draw.line((center_x - 48, baseline - 48, center_x + 48, baseline - 48), fill=(*highlight, 58), width=3)
+        points = [(x, y - 26) for x, y in columns]
+        draw.line(points, fill=(*surface, 230), width=15, joint="curve")
+        draw.line(points, fill=(*accent, 230), width=5, joint="curve")
+        for point in points:
+            draw.ellipse((point[0] - 25, point[1] - 25, point[0] + 25, point[1] + 25), fill=(*highlight, 196))
+            draw.ellipse((point[0] - 10, point[1] - 10, point[0] + 10, point[1] + 10), fill=(*accent, 246))
+    else:
+        # Insight and decision pages use a two-way learning loop.  The shapes
+        # communicate augmentation and governance without claiming to be a UI
+        # or placing any words inside the visual.
+        left_box = (214, 222, 754, 678)
+        right_box = (846, 222, 1386, 678)
+        glass_panel(left_box, support, radius=72, alpha=138)
+        glass_panel(right_box, accent, radius=72, alpha=138)
+        centers = ((486, 450), (1114, 450))
+        for index, center in enumerate(centers):
+            fill = accent if index == 0 else support
+            draw.ellipse(
+                (center[0] - 118, center[1] - 118, center[0] + 118, center[1] + 118),
+                fill=(*fill, 190),
+                outline=(*highlight, 94),
+                width=3,
+            )
+            draw.ellipse(
+                (center[0] - 64, center[1] - 64, center[0] + 64, center[1] + 64),
+                fill=(*surface, 128),
+            )
+            draw.arc(
+                (center[0] - 154, center[1] - 154, center[0] + 154, center[1] + 154),
+                start=38 + index * 174,
+                end=274 + index * 174,
+                fill=(*highlight, 190),
+                width=10,
+            )
+        bridge = [(726, 404), (874, 404), (946, 450), (874, 496), (726, 496), (654, 450)]
+        shadow_draw.polygon([(x + 12, y + 16) for x, y in bridge], fill=(0, 0, 0, 96))
+        draw.polygon(bridge, fill=(*blend(accent, support, 0.5), 206), outline=(*highlight, 84))
+        draw.line((696, 450, 904, 450), fill=(*highlight, 164), width=4)
 
     shadow = shadow.filter(ImageFilter.GaussianBlur(20))
     canvas.alpha_composite(shadow)
@@ -3349,9 +3513,15 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
             deck.theme.palette,
             slide,
         )
+        light_page = _is_light_color(slide_bg)
+        card_surface = "rgba(255,255,255,.90)" if light_page else "rgba(19,23,31,.88)"
+        card_surface_soft = "rgba(255,255,255,.80)" if light_page else "rgba(19,23,31,.76)"
+        card_border = "rgba(31,41,55,.14)" if light_page else "rgba(255,255,255,.18)"
         slide_style = (
             f"--bg:#{slide_bg};--fg:#{slide_fg};"
             f"--accent:#{slide_accent};--soft:#{slide_soft};"
+            f"--card-surface:{card_surface};--card-surface-soft:{card_surface_soft};"
+            f"--card-border:{card_border};"
         )
         explainer_html = _explainer_html(slide)
         title = _ppt_title_text(_ppt_display_title_for_slide(slide, deck.title))
@@ -3674,7 +3844,7 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
     .treatment-layered_cutout .frame-asset {{ border: 1px solid rgba(255,255,255,.24); border-radius: 36px; transform: none; box-shadow: -14px 18px 0 color-mix(in srgb, var(--accent) 12%, transparent), 0 36px 90px rgba(0,0,0,.48); }}
     .treatment-evidence_strip .frame-asset {{ border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent); border-radius: 24px; }}
     .treatment-atmospheric_backdrop .frame-asset img {{ filter: saturate(.96) contrast(1.06) brightness(.92); transform: scale(1.018); }}
-    .block {{ position: relative; overflow: visible; min-width: 0; min-height: 104px; display: grid; align-content: center; padding: 18px; border-radius: 16px; background: color-mix(in srgb, var(--bg) 91%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); box-shadow: 0 14px 34px rgba(0,0,0,.24); }}
+    .block {{ position: relative; overflow: visible; min-width: 0; min-height: 104px; display: grid; align-content: center; padding: 18px; border-radius: 16px; background: var(--card-surface); border: 1px solid var(--card-border); box-shadow: 0 14px 34px rgba(0,0,0,.20); }}
     .block::after {{ content: ""; position: absolute; inset: auto -30px -45px auto; width: 110px; height: 110px; border-radius: 999px; background: var(--accent); opacity: .10; }}
     .block p {{ display: block; overflow: visible; font-size: var(--type-card); line-height: 1.38; margin: 0; }}
     .explainer-layer {{
@@ -3689,7 +3859,7 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
       margin: 0 0 24px 0;
       border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
       border-radius: 22px;
-      background: color-mix(in srgb, var(--bg) 72%, transparent);
+      background: var(--card-surface-soft);
       box-shadow: 0 24px 70px rgba(0,0,0,.38);
       backdrop-filter: blur(20px);
       pointer-events: none;
@@ -3703,7 +3873,7 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
       padding: 11px 13px;
       border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
       border-radius: 14px;
-      background: color-mix(in srgb, var(--bg) 72%, transparent);
+      background: var(--card-surface);
       overflow: hidden;
       font-size: 13px;
       line-height: 1.28;
