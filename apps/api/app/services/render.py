@@ -2157,7 +2157,22 @@ def _write_owned_explainer_visual_asset(
     conceptual feedback loop) to give the page depth while the editable PPT
     text carries the actual labels.
     """
+    # Draw at a compact logical canvas, then export with a deterministic
+    # high-quality raster scale.  This keeps our own vector-like art clean
+    # without sending it through Real-ESRGAN, which can invent tiled artifacts
+    # on flat gradients and thin editorial lines.
     width, height = 1600, 900
+    key_page = composition_archetype in {
+        "cinematic_hero",
+        "editorial_cover",
+        "architectural_cover",
+        "statement_focus",
+        "closing_bloom",
+        "closing_echo",
+        "future_horizon",
+        "manifesto_close",
+    }
+    delivery_width, delivery_height = (3840, 2160) if key_page else (1920, 1080)
 
     def rgb(value: str, fallback: tuple[int, int, int]) -> tuple[int, int, int]:
         match = re.fullmatch(r"#?([0-9a-fA-F]{6})", str(value or "").strip())
@@ -2478,7 +2493,11 @@ def _write_owned_explainer_visual_asset(
 
     file_name = f"slide-{slide_index}-owned-explainer.png"
     path = assets_dir / file_name
-    canvas.convert("RGB").save(path, format="PNG", optimize=True)
+    delivery_canvas = canvas.convert("RGB").resize(
+        (delivery_width, delivery_height),
+        Image.Resampling.LANCZOS,
+    )
+    delivery_canvas.save(path, format="PNG", optimize=True)
     return VisualAsset(
         slide_index=slide_index,
         path=path,
@@ -2496,10 +2515,10 @@ def _write_owned_explainer_visual_asset(
             "HumanizePPT owned explanatory visual library / selected after open-web search because "
             "this slide requires a semantic visual explanation rather than decorative stock photography"
         ),
-        width=width,
-        height=height,
-        original_width=width,
-        original_height=height,
+        width=delivery_width,
+        height=delivery_height,
+        original_width=delivery_width,
+        original_height=delivery_height,
     )
 
 

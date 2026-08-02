@@ -356,7 +356,9 @@ def test_owned_explainer_visual_is_a_delivery_safe_raster_asset(tmp_path) -> Non
     assert asset.source_type == "owned_design_library"
     assert asset.mime_type == "image/png"
     assert asset.path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
-    assert render_service.raster_dimensions(asset.path) == (1600, 900)
+    # Owned explanatory visuals export at the delivery-safe 16:9 floor instead
+    # of passing through an AI upscaler that can damage vector-like artwork.
+    assert render_service.raster_dimensions(asset.path) == (1920, 1080)
     assert render_service._uses_owned_explainer_visual("data_visual", expert_mode=True)
     assert not render_service._uses_owned_explainer_visual("business_scene", expert_mode=True)
     assert render_service._uses_owned_explainer_visual(
