@@ -130,6 +130,27 @@ def _image_type(
         if purpose in {"insight", "conclusion"}:
             return "thesis_concept"
         return "business_scene"
+    if _is_ai_education_content(content):
+        # A research-report default would otherwise make every education page
+        # a generic thesis concept.  These roles intentionally mirror the
+        # narrative: a human learning setting, a system map, evidence, then a
+        # decision-oriented close.
+        if purpose in {"agenda", "framework"} or archetype in {
+            "chapter_index",
+            "system_map",
+            "process_ribbon",
+            "orbit_system",
+        }:
+            return "icon_illustration"
+        if purpose == "evidence" or archetype in {
+            "data_landscape",
+            "proof_mosaic",
+            "evidence_matrix",
+        }:
+            return "data_visual"
+        if purpose in {"cover", "context", "recommendation"}:
+            return "course_review_atmosphere"
+        return "thesis_concept"
     if deck_type == "business_pitch":
         if purpose in {"agenda", "framework"} or archetype in {"chapter_index", "system_map"}:
             return "icon_illustration"
@@ -230,6 +251,27 @@ def _search_query(
             f"enterprise AI agents {page_intent} {type_suffix}",
             220,
         )
+    if _is_ai_education_content(raw.casefold()):
+        page_intent = {
+            "cover": "university seminar with educators and students using AI-assisted learning materials",
+            "agenda": "higher education learning design roadmap with four connected physical stages",
+            "context": "teacher and students reviewing a learning task with clear human guidance",
+            "framework": "teaching learning assessment governance shown as a connected academic ecosystem",
+            "evidence": "learning process evidence, feedback artifacts, and integrity review represented by physical objects",
+            "insight": "student reflection and guided practice with responsible AI support",
+            "recommendation": "course team planning a one-term responsible AI pilot with faculty ownership",
+            "conclusion": "university learning environment balancing AI support, student reasoning, and integrity",
+        }.get(purpose, "responsible generative AI adoption in higher education")
+        type_suffix = {
+            "course_review_atmosphere": "authentic university learning scene, no visible text",
+            "icon_illustration": "premium editorial concept illustration, no labels or interface",
+            "data_visual": "abstract evidence still life, no dashboard, no text",
+            "thesis_concept": "premium academic concept photograph, no visible text",
+        }.get(image_type, "premium university photograph, no visible text")
+        return _clip(
+            f"generative AI higher education {page_intent} {type_suffix}",
+            220,
+        )
     subject = _primary_subject(raw)
     slide_focus = _clean(
         " ".join(
@@ -264,6 +306,34 @@ def _is_enterprise_ai_content(value: str) -> bool:
         for term in ("adoption", "pilot", "scale", "roi", "deployment", "采用", "试点", "规模化", "投资回报")
     )
     return ai and enterprise and adoption
+
+
+def _is_ai_education_content(value: str) -> bool:
+    normalized = str(value).casefold()
+    has_ai = bool(
+        re.search(r"(?:^|\W)ai(?:$|\W)", normalized, re.IGNORECASE)
+        or any(term in normalized for term in ("generative ai", "artificial intelligence", "aigc", "人工智能"))
+    )
+    has_education = any(
+        term in normalized
+        for term in (
+            "education",
+            "higher education",
+            "university",
+            "college",
+            "teaching",
+            "learning",
+            "assessment",
+            "academic integrity",
+            "教育",
+            "高校",
+            "大学",
+            "教学",
+            "学习",
+            "评价",
+        )
+    )
+    return has_ai and has_education
 
 
 def _primary_subject(value: str) -> str:

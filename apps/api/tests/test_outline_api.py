@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from ai_ppt_contracts import SourcePack
 from app.config import Settings
 from app.main import create_app
+from app.services import outline as outline_service
 from app.services.research import TopicResearchResult
 
 
@@ -281,6 +282,73 @@ def test_enterprise_ai_outline_replaces_generic_ai_with_roi_decision_story(
     assert len({slide["keyPoint"] for slide in outline["slides"]}) == len(
         outline["slides"]
     )
+
+
+def test_english_ai_education_research_uses_decision_ready_story_not_generic_action_filler(
+    client,
+) -> None:
+    project = {
+        **PROJECT,
+        "projectId": "ai-education-research-outline",
+        "outputLanguage": "en",
+        "deckType": "research_report",
+        "topic": "Generative AI adoption in higher education",
+        "audience": "University leadership",
+        "agentMode": "research",
+    }
+    assert create_project(client, project).status_code == 201
+    source_pack = {
+        "schemaVersion": "1.0.0",
+        "projectId": project["projectId"],
+        "sources": [
+            {
+                "schemaVersion": "1.0.0",
+                "sourceId": "web-research-synthesis-ai-education",
+                "sourceType": "text",
+                "title": "Generative AI adoption in higher education: public-source synthesis",
+                "summary": "Article thesis: Generative AI changes teaching, learning, assessment, and governance.",
+            }
+        ],
+    }
+
+    response = generate_outline(
+        client,
+        project["projectId"],
+        body={"sourcePack": source_pack},
+    )
+
+    assert response.status_code == 200
+    outline = response.json()["outlineDecision"]
+    titles = [slide["title"] for slide in outline["slides"]]
+    visible = " ".join(
+        text
+        for slide in outline["slides"]
+        for text in [slide["title"], slide["keyPoint"], *slide["talkingPoints"]]
+    )
+    assert titles[-2:] == [
+        "Pilot one course before institutional scale",
+        "Scale only when learning and integrity improve",
+    ]
+    assert "translate the conclusion into steps" not in visible
+    assert "one course owner" in visible
+    assert "scale, redesign, or stop gate" in visible
+    assert all("…" not in text for text in visible.split("\n"))
+
+
+def test_outline_clip_keeps_complete_words_and_balanced_parentheses() -> None:
+    clipped = outline_service._clip_text(
+        "Teaching: use generative AI for preparation and tailored support while educators define the task.",
+        72,
+    )
+    parenthetical = outline_service._clip_text(
+        "What does Generative Artificial Intelligence (AI) adoption in higher education change?",
+        49,
+    )
+
+    assert clipped.endswith("support")
+    assert "…" not in clipped
+    assert "while" not in clipped
+    assert parenthetical.count("(") == parenthetical.count(")")
 
 
 def test_supplied_source_pack_skips_automatic_topic_research(client, monkeypatch) -> None:

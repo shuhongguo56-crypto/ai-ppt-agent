@@ -839,6 +839,20 @@ def _logic_chain_summary(
                 "Action for audience: select one frequent, measurable, reversible workflow and use 90 days to continue, redesign, or stop.",
             ]
         )
+    if language != "zh" and _is_ai_education_topic(f"{topic} {audience}"):
+        return "\n".join(
+            [
+                "PPT logic chain:",
+                "Central question: how can higher education use generative AI to improve learning without outsourcing student judgment?",
+                "Why now: generative AI is already changing preparation, feedback, and assessment, so course design and governance must change together.",
+                "Mechanism: teaching design, learner practice, assessment evidence, and governance controls form one operating system rather than four isolated tools.",
+                "Evidence map:",
+                "- Public evidence: capabilities, educational use cases, and documented integrity or privacy risks.",
+                "- Local evidence: feedback quality, process evidence, student reasoning, and academic-integrity outcomes for the actual course.",
+                "Risk boundary: fast output is not proof of learning; disclosure, verification, and meaningful human review remain essential.",
+                f"Action for audience: during the next term, assign a course owner, pilot one approved use case, require disclosure, and use a learning-and-integrity review before scaling for {audience}.",
+            ]
+        )
     first_point = key_points[0] if key_points else thesis
     second_point = key_points[1] if len(key_points) > 1 else first_point
     evidence_line = evidence[0] if evidence else "public sources provide context but still require verification"

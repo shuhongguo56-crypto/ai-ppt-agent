@@ -1753,6 +1753,19 @@ def _is_auto_research_profile(source_profile: _SourceProfile) -> bool:
     )
 
 
+def _is_auto_research_ai_education_source(
+    brief: ProjectBrief,
+    source_profile: _SourceProfile,
+) -> bool:
+    return (
+        not _is_zh(brief)
+        and _is_auto_research_profile(source_profile)
+        and _is_ai_education_topic(
+            f"{brief.topic} {brief.audience} {source_profile.title} {source_profile.thesis}"
+        )
+    )
+
+
 def _distinct_source_claims(source_profile: _SourceProfile) -> list[str]:
     candidates = [
         *source_profile.key_points,
@@ -2261,6 +2274,17 @@ def _source_slide_title(
                 "recommendation": f"行动优先级：{_source_title_fragment(anchor, '落地路径', 18)}",
                 "conclusion": f"最终判断：{_source_title_fragment(anchor, '下一步', 20)}",
             }
+    elif _is_auto_research_ai_education_source(brief, source_profile):
+        mapping = {
+            "cover": "Generative AI in higher education",
+            "agenda": "Teaching, learning, assessment, governance",
+            "context": "Why AI changes the learning contract",
+            "framework": "Four design layers for trustworthy AI use",
+            "evidence": "Evidence: process proof, not speed alone",
+            "insight": "Insight: augment judgment, not answer substitution",
+            "recommendation": "Pilot one course before institutional scale",
+            "conclusion": "Scale only when learning and integrity improve",
+        }
     else:
         mapping = {
             "cover": topic_label,
@@ -2330,6 +2354,17 @@ def _source_slide_key_point(
             "insight": f"洞察：{anchor}",
             "recommendation": f"行动：{anchor}",
             "conclusion": f"结论：{anchor}",
+        }
+    elif _is_auto_research_ai_education_source(brief, source_profile):
+        mapping = {
+            "cover": "Generative AI should improve teaching, learning, assessment, and governance—not merely accelerate content production.",
+            "agenda": "Move from the learning problem to a practical design, evidence, and scale decision.",
+            "context": "Improve learning without outsourcing student reasoning or weakening academic integrity.",
+            "framework": "Design teaching, learning, assessment, and governance as one connected system.",
+            "evidence": "Judge value with process evidence, feedback quality, and academic-integrity safeguards.",
+            "insight": "The premium use of AI is guided practice and feedback—not answer substitution.",
+            "recommendation": "During one term, pilot one approved use case; require disclosure and review learning quality before scale.",
+            "conclusion": "Decision gate: expand only when learning quality and integrity both improve.",
         }
     else:
         mapping = {
@@ -2408,6 +2443,47 @@ def _source_talking_points(
             "conclusion": [
                 "AI 应成为反馈与理解增强器，而不是学习替身。",
                 "最终目标是让学生更会判断、更会表达、更会负责。",
+            ],
+        }
+        return mapping[purpose]
+    if _is_auto_research_ai_education_source(brief, source_profile):
+        mapping = {
+            "cover": [
+                "Treat AI as a learning-design decision, not a content-production shortcut.",
+                "Keep student judgment, source checking, and human accountability visible.",
+            ],
+            "agenda": [
+                "Start with the learning problem before choosing a tool or platform.",
+                "End with a term-level decision gate instead of a generic implementation claim.",
+            ],
+            "context": [
+                "Educators need timely feedback without removing the work that develops student reasoning.",
+                "Students need support for practice and inquiry, not an invisible answer substitute.",
+            ],
+            "framework": [
+                "Teaching: define learning tasks, examples, feedback moments, and acceptance criteria.",
+                "Learning: use AI for inquiry and practice while retaining reading, reasoning, and original expression.",
+                "Assessment: collect process evidence, reflection, and oral explanation alongside final work.",
+                "Governance: define approved uses, disclosure, privacy boundaries, and verification ownership.",
+            ],
+            "evidence": [
+                "Public sources establish capability and risk context; the course must still measure learning outcomes.",
+                "Use process evidence and feedback quality rather than output speed as the primary value signal.",
+                "Audit disclosure, source checking, and oral explanation when integrity risk is material.",
+            ],
+            "insight": [
+                "AI becomes valuable when it increases guided practice, feedback, and reflection.",
+                "Replacing student work may improve speed while reducing the evidence of real learning.",
+            ],
+            "recommendation": [
+                "Name one course owner and one low-risk teaching use case.",
+                "Set approved-use, disclosure, and evidence rules before launch.",
+                "Review feedback quality, student reasoning, and integrity after one term.",
+            ],
+            "conclusion": [
+                "Expand only if learning quality and integrity both improve.",
+                "Keep a human review path for exceptions and disputed work.",
+                "Use the next-term review as the scale, redesign, or stop gate.",
             ],
         }
         return mapping[purpose]
@@ -2518,10 +2594,40 @@ def _pick(items: list[str], index: int, fallback: str) -> str:
 
 
 def _clip_text(value: str, limit: int) -> str:
-    value = " ".join(str(value).split()).strip()
-    if len(value) <= limit:
-        return value
-    return value[: max(0, limit - 1)].rstrip() + "…"
+    """Clip source text only at a semantic boundary.
+
+    Outline text is canonical user-visible copy.  Appending an ellipsis after
+    a raw character slice is unsafe because the renderers intentionally remove
+    visible ellipses, leaving fragments such as ``whil`` or ``(AI`` in the
+    final PPTX/HTML.  Prefer a nearby sentence/clause boundary, otherwise a
+    full word boundary, and never return an unmatched parenthesis.
+    """
+
+    text = " ".join(str(value).split()).strip()
+    if len(text) <= limit:
+        return text
+    window = text[: max(1, limit)].rstrip()
+    punctuation = max(
+        (window.rfind(marker) for marker in ("。", "！", "？", ".", "!", "?", "；", ";", "，", ",", "：", ":")),
+        default=-1,
+    )
+    if punctuation >= int(limit * 0.42):
+        window = window[:punctuation]
+    elif not re.search(r"[\u3400-\u9fff]", window):
+        boundary = window.rfind(" ")
+        if boundary >= int(limit * 0.42):
+            window = window[:boundary]
+    if window.count("(") > window.count(")"):
+        window = window[: window.rfind("(")]
+    window = window.strip(" \t\r\n，。；：、,:;—–-()")
+    dangling = {
+        "a", "an", "and", "as", "at", "but", "by", "for", "from", "if", "in", "into",
+        "of", "on", "or", "than", "that", "the", "to", "when", "while", "which", "with",
+    }
+    words = window.split()
+    while len(words) > 3 and words[-1].casefold() in dangling:
+        words.pop()
+    return " ".join(words).strip(" \t\r\n，。；：、,:;—–-()")
 
 
 def _strip_encoding_damage(value: str) -> str:

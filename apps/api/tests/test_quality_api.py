@@ -171,6 +171,72 @@ def test_quality_check_passes_for_rendered_artifacts(client) -> None:
     }
 
 
+def test_english_ai_education_research_deck_passes_delivery_quality(client) -> None:
+    project_id = "ai-education-quality"
+    project = {
+        **PROJECT,
+        "projectId": project_id,
+        "outputLanguage": "en",
+        "deckType": "research_report",
+        "topic": "Generative AI adoption in higher education",
+        "audience": "University leadership",
+        "agentMode": "research",
+    }
+    source_pack = {
+        "schemaVersion": "1.0.0",
+        "projectId": project_id,
+        "sources": [
+            {
+                "schemaVersion": "1.0.0",
+                "sourceId": "web-research-synthesis-ai-education",
+                "sourceType": "text",
+                "title": "Generative AI adoption in higher education: public-source synthesis",
+                "summary": "Article thesis: Generative AI changes teaching, learning, assessment, and governance.",
+            }
+        ],
+    }
+    assert client.post("/api/projects", json=project).status_code == 201
+    outline = client.post(
+        f"/api/projects/{project_id}/outline/generate",
+        json={"sourcePack": source_pack},
+    )
+    assert outline.status_code == 200
+    confirmed = client.post(
+        f"/api/projects/{project_id}/outline/confirm",
+        json={"outlineDecisionVersion": outline.json()["version"]},
+    )
+    visual = client.post(
+        f"/api/projects/{project_id}/visual-directions/generate",
+        json={"outlineDecisionVersion": confirmed.json()["version"]},
+    )
+    direction_id = visual.json()["visualDirection"]["directions"][0]["directionId"]
+    selected = client.post(
+        f"/api/projects/{project_id}/visual-directions/select",
+        json={"visualDirectionVersion": visual.json()["version"], "directionId": direction_id},
+    )
+    deck = client.post(
+        f"/api/projects/{project_id}/slide-deck/assemble",
+        json={"visualDirectionVersion": selected.json()["version"]},
+    )
+    rendered = client.post(
+        f"/api/projects/{project_id}/render",
+        json={"slideDeckVersion": deck.json()["version"]},
+    )
+    assert rendered.status_code == 200
+    quality = client.post(
+        f"/api/projects/{project_id}/quality/check",
+        json={"renderVersion": rendered.json()["version"]},
+    )
+
+    assert quality.status_code == 200
+    assert quality.json()["qualityReport"]["passed"] is True, [
+        (check["name"], check["detail"])
+        for check in quality.json()["qualityReport"]["checks"]
+        if check["status"] != "passed"
+    ]
+    assert quality.json()["closedLoop"]["status"] == "ready"
+
+
 def test_terminal_ellipsis_quality_checks_inspect_final_artifacts(tmp_path) -> None:
     pptx_path = tmp_path / "truncated.pptx"
     with zipfile.ZipFile(pptx_path, "w") as archive:
