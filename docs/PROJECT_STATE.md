@@ -1,5 +1,14 @@
 # AI PPT Agent Project State
 
+## 2026-08-02 public runtime recovery and composition expansion
+
+- Research and enterprise generation now have 24 native page-composition families. The design planner assigns a distinct composition where the deck size permits, and the delivery gate compares rendered PPTX geometry so repeated card/visual structures cannot pass as different layouts.
+- The latest verified long-form research render used 22 distinct native page structures; PPTX and HyperFrames remain two renderers of the same canonical `SlideDeck JSON`.
+- `/api/runtime/status` now returns non-secret service, application-version, and build-revision markers. The public runtime supervisor refuses to retain an older local worker, upgrades only this project’s verified local API, and exposes the expected revision for diagnosis.
+- `scripts/public-runtime.ps1` now probes Cloudflare quick-tunnel health with the Python TLS stack and bypasses the host-local proxy only for the public probe. This prevents a known Windows proxy/Schannel false negative from updating the Pages redirect to a dead origin.
+- Latest focused backend verification: `apps/api/tests/test_health.py` 20 passed. Web TypeScript typecheck and Next.js production build passed. The active public entry was refreshed only after a direct external status probe returned the current build revision `5a7eff7`.
+- Public entry: `https://shuhongguo56-crypto.github.io/ai-ppt-agent/live/`. Its backend remains a free Cloudflare **quick tunnel**, so it is suitable for an active demo but not a permanent production origin; move to a named Cloudflare tunnel or hosted API before contractual uptime is promised.
+
 ## 2026-07-19 enterprise research delivery closure
 
 - Research mode now supplements sparse user input with topic-relevant public research, authoritative fallback sources, an evidence matrix, explicit inference/risk boundaries, and a decision-oriented argument chain.
