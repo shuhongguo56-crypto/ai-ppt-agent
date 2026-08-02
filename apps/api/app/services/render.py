@@ -956,6 +956,64 @@ def _openverse_candidate_score(item: dict, query: str) -> int:
     return score
 
 
+def _commons_candidate_score(
+    page: dict,
+    image_info: dict,
+    *,
+    query: str,
+    image_type: str,
+) -> int:
+    """Rank Commons files by their likely usefulness on this particular page.
+
+    Commons search order is often archival rather than visual: a query for a
+    seminar can lead with an empty room, a seating plan, or a PDF.  Use the
+    descriptive file name plus the requested visual role to favour an actual
+    human learning interaction where the slide asks for one.
+    """
+    title = str(page.get("title") or "")
+    attribution = _commons_attribution(image_info) or ""
+    metadata = f"{title} {attribution}".casefold()
+    score = _openverse_candidate_score(
+        {
+            "title": title,
+            "tags": [],
+            "width": int(image_info.get("width") or 0),
+            "height": int(image_info.get("height") or 0),
+        },
+        query,
+    )
+    width = int(image_info.get("width") or 0)
+    height = int(image_info.get("height") or 0)
+    if width >= 1280 and height >= 720:
+        score += 4
+    if height and width / height >= 1.3:
+        score += 3
+    human_terms = (
+        "student",
+        "students",
+        "professor",
+        "teacher",
+        "faculty",
+        "lecturer",
+        "seminar",
+        "discussion",
+        "workshop",
+        "meeting",
+        "learning",
+        "teaching",
+    )
+    human_hits = sum(term in metadata for term in human_terms)
+    if image_type in {"course_review_atmosphere", "business_scene", "thesis_concept"}:
+        score += human_hits * 5
+        if any(term in metadata for term in ("empty", "seater", "interior", "building", "architecture")):
+            score -= 12
+    elif image_type in {"icon_illustration", "data_visual"}:
+        score += human_hits * 2
+    if any(term in metadata for term in ("chart", "diagram", "poster", "document", "screenshot")):
+        score -= 20
+    return score
+
+
 def _openverse_candidate_metadata(item: dict) -> str:
     metadata_parts = [str(item.get("title") or "")]
     for tag in item.get("tags") or []:
@@ -1187,7 +1245,10 @@ def _search_commons_visual_asset(
             "action": "query",
             "generator": "search",
             "gsrnamespace": "6",
-            "gsrlimit": "4",
+            # A four-result response made every classroom page choose the same
+            # first image.  Fetch a small, bounded pool so title relevance and
+            # deterministic page rotation can produce genuinely distinct pages.
+            "gsrlimit": "16",
             "gsrsearch": query,
             "prop": "imageinfo",
             "iiprop": "url|mime|size|extmetadata",
@@ -1197,8 +1258,13 @@ def _search_commons_visual_asset(
     try:
         payload = _read_json_url(search_url, timeout=_image_search_timeout(timeout_seconds))
         pages = (payload.get("query") or {}).get("pages") or {}
+        candidates: list[tuple[dict, dict, str]] = []
         for page in pages.values():
+            if not isinstance(page, dict):
+                continue
             for image_info in page.get("imageinfo") or []:
+                if not isinstance(image_info, dict):
+                    continue
                 candidate_metadata = " ".join(
                     part
                     for part in (
@@ -1217,33 +1283,50 @@ def _search_commons_visual_asset(
                 image_url = str(image_info.get("url") or "")
                 if not image_url:
                     continue
-                extension = _extension_for_mime(mime_type)
-                file_name = f"slide-{slide_index}-commons{extension}"
-                path = assets_dir / file_name
-                actual_mime = _download_binary(image_url, path, timeout=_image_search_timeout(timeout_seconds))
-                if (
-                    actual_mime not in {"image/jpeg", "image/png"}
-                    or not path.is_file()
-                    or path.stat().st_size <= 0
-                    or _image_has_excessive_visible_text(path)
-                ):
-                    path.unlink(missing_ok=True)
-                    continue
-                return VisualAsset(
-                    slide_index=slide_index,
-                    path=path,
-                    rel_path=f"assets/{file_name}",
-                    file_name=file_name,
-                    mime_type=mime_type,
-                    source_type="wikimedia_commons_search",
-                    alt=_asset_alt(slide_index, query),
-                    query=query,
-                    image_type=image_type,
-                    purpose=purpose,
-                    prompt=prompt,
-                    provider_chain=provider_chain,
-                    attribution=_commons_attribution(image_info),
-                )
+                candidates.append((page, image_info, candidate_metadata))
+        ordered_candidates = sorted(
+            candidates,
+            key=lambda candidate: _commons_candidate_score(
+                candidate[0],
+                candidate[1],
+                query=query,
+                image_type=image_type,
+            ),
+            reverse=True,
+        )
+        if ordered_candidates:
+            offset = (max(1, slide_index) - 1) % len(ordered_candidates)
+            ordered_candidates = ordered_candidates[offset:] + ordered_candidates[:offset]
+        for page, image_info, _candidate_metadata in ordered_candidates:
+            mime_type = str(image_info.get("mime") or "")
+            image_url = str(image_info.get("url") or "")
+            extension = _extension_for_mime(mime_type)
+            file_name = f"slide-{slide_index}-commons{extension}"
+            path = assets_dir / file_name
+            actual_mime = _download_binary(image_url, path, timeout=_image_search_timeout(timeout_seconds))
+            if (
+                actual_mime not in {"image/jpeg", "image/png"}
+                or not path.is_file()
+                or path.stat().st_size <= 0
+                or _image_has_excessive_visible_text(path)
+            ):
+                path.unlink(missing_ok=True)
+                continue
+            return VisualAsset(
+                slide_index=slide_index,
+                path=path,
+                rel_path=f"assets/{file_name}",
+                file_name=file_name,
+                mime_type=mime_type,
+                source_type="wikimedia_commons_search",
+                alt=_asset_alt(slide_index, query),
+                query=query,
+                image_type=image_type,
+                purpose=purpose,
+                prompt=prompt,
+                provider_chain=provider_chain,
+                attribution=_commons_attribution(image_info),
+            )
     except (OSError, ValueError, TimeoutError, json.JSONDecodeError):
         return None
     return None

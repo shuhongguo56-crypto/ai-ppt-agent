@@ -320,6 +320,24 @@ def test_ai_higher_education_search_queries_follow_the_slide_story_beat() -> Non
     assert "artificial intelligence research" not in queries
 
 
+def test_commons_ranking_prefers_people_over_an_empty_classroom() -> None:
+    shared_info = {"width": 3456, "height": 2304, "size": 2_000_000, "mime": "image/jpeg"}
+    human_score = render_service._commons_candidate_score(
+        {"title": "File:A college professor teaching students in a university classroom discussion.jpg"},
+        shared_info,
+        query="university classroom",
+        image_type="course_review_atmosphere",
+    )
+    empty_score = render_service._commons_candidate_score(
+        {"title": "File:130 Seater university classroom interior.jpg"},
+        shared_info,
+        query="university classroom",
+        image_type="course_review_atmosphere",
+    )
+
+    assert human_score > empty_score
+
+
 def create_renderable_deck(client) -> dict:
     assert client.post("/api/projects", json=PROJECT).status_code == 201
     outline = client.post("/api/projects/project-render/outline/generate", json={})
