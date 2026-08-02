@@ -1484,6 +1484,39 @@ def _requires_text_safe_conclusion_visual(*values: str) -> bool:
 
 def _ai_semantic_subject(cues: str, purpose: str, fallback: str) -> str:
     lowered = cues.casefold()
+    ai_education = (
+        any(marker in lowered for marker in (" ai", "artificial intelligence", "generative ai", "machine learning", "llm", "人工智能", "生成式"))
+        and any(
+            marker in lowered
+            for marker in (
+                "education",
+                "higher education",
+                "university",
+                "college",
+                "teaching",
+                "learning",
+                "assessment",
+                "教育",
+                "高校",
+                "大学",
+                "教学",
+                "学习",
+                "课程",
+            )
+        )
+    )
+    if ai_education:
+        education_scenes = {
+            "cover": "a university seminar with faculty and diverse students discussing responsible generative AI adoption around a clean shared table",
+            "agenda": "four connected university learning spaces represented by faculty and students moving between seminar, tutorial, assessment, and governance review",
+            "context": "an instructor and students reviewing a learning task together, with human guidance visibly leading the discussion",
+            "framework": "a faculty workshop connecting teaching, learning, assessment, and governance through four tactile unmarked objects on one table",
+            "evidence": "a university learning-review table with feedback notes, source cards, and oral-review materials, all blank and unmarked",
+            "insight": "a student receiving guided feedback from an instructor in a quiet university studio, with reflection and human judgment central",
+            "recommendation": "a small faculty team planning a one-term responsible AI course pilot with clear ownership and review moments",
+            "conclusion": "a university leadership review at the end of a pilot, with people choosing a careful scale, redesign, or stop path",
+        }
+        return education_scenes.get(purpose, fallback)
     enterprise_ai = (
         any(marker in lowered for marker in ("enterprise", "business", "organization", "企业", "业务", "组织"))
         and any(marker in lowered for marker in (" ai ", "artificial intelligence", "agent", "agentic", "人工智能", "智能体"))

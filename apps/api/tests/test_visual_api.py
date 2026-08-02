@@ -143,6 +143,49 @@ def test_chinese_classroom_project_gets_content_aware_visual_directions(client) 
     assert direction_ids[:3] == ["workshop_playbook", "classroom_friendly", "data_story"]
 
 
+def test_ai_higher_education_research_is_not_misrouted_to_biomedical_art_direction(client) -> None:
+    project = PROJECT | {
+        "projectId": "project-visual-ai-education",
+        "outputLanguage": "en",
+        "deckType": "research_report",
+        "topic": "Generative AI adoption in higher education",
+        "audience": "University leadership",
+        "agentMode": "research",
+    }
+    source_pack = {
+        "schemaVersion": "1.0.0",
+        "projectId": project["projectId"],
+        "sources": [
+            {
+                "schemaVersion": "1.0.0",
+                "sourceId": "web-research-synthesis-ai-education",
+                "sourceType": "text",
+                "title": "Generative AI adoption in higher education: public-source synthesis",
+                "summary": "Article thesis: Generative AI changes teaching, learning, assessment, and governance.",
+            }
+        ],
+    }
+    assert client.post("/api/projects", json=project).status_code == 201
+    outline = client.post(
+        f"/api/projects/{project['projectId']}/outline/generate",
+        json={"sourcePack": source_pack},
+    )
+    assert outline.status_code == 200
+    confirmed = client.post(
+        f"/api/projects/{project['projectId']}/outline/confirm",
+        json={"outlineDecisionVersion": outline.json()["version"]},
+    )
+    generated = client.post(
+        f"/api/projects/{project['projectId']}/visual-directions/generate",
+        json={"outlineDecisionVersion": confirmed.json()["version"]},
+    )
+
+    assert generated.status_code == 200
+    direction_ids = [item["directionId"] for item in generated.json()["visualDirection"]["directions"]]
+    assert direction_ids[:3] == ["research_journal", "data_story", "academic_clean"]
+    assert "medical_science" not in direction_ids[:3]
+
+
 def test_brand_retail_case_gets_non_generic_visual_directions(client) -> None:
     project = PROJECT | {
         "projectId": "project-visual-luckin",

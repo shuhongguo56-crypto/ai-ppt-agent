@@ -664,6 +664,12 @@ def _recommended_direction_ids(outline: OutlineDecision) -> list[str]:
         keyword in outline.audience.lower()
         for keyword in ["teacher", "student", "undergraduate", "professor", "committee", "学", "老师", "学生", "答辩", "导师"]
     )
+    # This needs to precede broad science/governance matching.  Research packs
+    # frequently contain incidental words such as "cell" or "health" in source
+    # metadata; a deck explicitly about AI in higher education must not inherit
+    # a biomedical art direction as a side effect of that background material.
+    if _is_ai_education_content(content):
+        return ["research_journal", "data_story", "academic_clean"]
     if _contains_any(content, ["crispr", "gene", "genome", "基因", "生物", "医学", "医疗", "药物", "健康", "细胞", "蛋白"]):
         return ["medical_science", "cinematic_research", "academic_clean"]
     if _contains_any(content, ["古风", "诗词", "国风", "传统文化", "历史", "文物", "heritage", "classical", "poetry"]):
@@ -763,7 +769,26 @@ def _outline_content_index(outline: OutlineDecision) -> str:
 
 
 def _contains_any(content: str, keywords: list[str]) -> bool:
-    return any(keyword.casefold() in content for keyword in keywords)
+    for keyword in keywords:
+        normalized = keyword.casefold()
+        if re.fullmatch(r"[a-z0-9][a-z0-9 -]*", normalized):
+            if re.search(rf"(?<![a-z0-9]){re.escape(normalized)}(?![a-z0-9])", content):
+                return True
+        elif normalized in content:
+            return True
+    return False
+
+
+def _is_ai_education_content(content: str) -> bool:
+    has_ai = _contains_any(
+        content,
+        ["ai", "artificial intelligence", "generative ai", "machine learning", "llm", "人工智能", "生成式"],
+    )
+    has_education = _contains_any(
+        content,
+        ["education", "higher education", "university", "college", "teaching", "learning", "assessment", "教育", "高校", "大学", "教学", "学习", "课程"],
+    )
+    return has_ai and has_education
 
 
 def _unique_direction_ids(ids: list[str]) -> list[str]:
