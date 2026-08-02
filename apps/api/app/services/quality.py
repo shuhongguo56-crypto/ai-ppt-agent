@@ -1891,7 +1891,7 @@ def _visual_asset_license_readiness(
             issues.append(f"slide {slide_index} missing license metadata")
             continue
         status = str(data.get("licenseStatus") or "unknown")
-        if status not in {"generated", "open-license"}:
+        if status not in {"generated", "open-license", "owned"}:
             issues.append(f"slide {slide_index} license={status}")
             continue
         ready += 1
