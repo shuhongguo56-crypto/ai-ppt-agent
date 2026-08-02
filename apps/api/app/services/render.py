@@ -3532,6 +3532,26 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
             deck.theme.palette,
             slide,
         )
+        # The owned library renders cinematic / closing pages as dark visual
+        # surfaces so they match PPTX.  HyperFrames must choose its foreground
+        # against that visible surface, not against the light direction palette
+        # that happened to seed the deck.
+        dark_visual_surface = plan.composition_archetype in {
+            "cinematic_hero",
+            "editorial_cover",
+            "architectural_cover",
+            "statement_focus",
+            "closing_bloom",
+            "closing_echo",
+            "future_horizon",
+            "manifesto_close",
+        }
+        if dark_visual_surface:
+            slide_bg = "1C1F28"
+            slide_fg = "FAF8F2"
+            slide_soft = "353646"
+            if not _is_light_color(slide_accent):
+                slide_accent = "B79BFF"
         light_page = _is_light_color(slide_bg)
         card_surface = "rgba(255,255,255,.90)" if light_page else "rgba(19,23,31,.88)"
         card_surface_soft = "rgba(255,255,255,.80)" if light_page else "rgba(19,23,31,.76)"
