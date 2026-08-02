@@ -798,8 +798,8 @@ def _search_open_visual_asset(
     deadline = time.monotonic() + _image_search_budget(timeout_seconds)
     for candidate_query in _image_search_queries(query, image_type)[:4]:
         for searcher in (
-            _search_openverse_visual_asset,
             _search_commons_visual_asset,
+            _search_openverse_visual_asset,
             _search_wikipedia_page_visual_asset,
             _search_bing_visual_asset,
         ):
