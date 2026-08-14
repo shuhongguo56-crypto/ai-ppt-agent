@@ -1,5 +1,14 @@
 # AI PPT Agent Project State
 
+## 2026-08-14 composition-discipline and visual-delivery closure
+
+- Research/enterprise PPTX rendering now favors one intentional composition per page instead of stacking repeated UI-style cards. Cover, chapter, editorial, statement, proof, system-map, priority, horizon, and closing pages use distinct spatial structures while staying inside the 16:9 safe area.
+- Visible renderer explanation panels were removed from customer slides. Provenance and QA markers remain metadata-only, so diagnostics no longer compete with the presentation content.
+- The enterprise gate now checks layout discipline directly: excessive cards, competing title-sized frames, exact visible-copy duplication, text/card collisions, and text placed over framed images all fail delivery.
+- Open-web visuals must meet delivery resolution, semantic relevance, and uniqueness requirements. EXIF orientation is normalized before PPTX embedding; undersized assets are resized for delivery; post-processing hash collisions are replaced with unique owned visuals.
+- Final verified sample: `D:\Codex\Outputs\HumanizePPT-Research-Delivery-20260806-layout-v3`, project `education-delivery-1785670400`, eight slides, PPTX and HyperFrames HTML from one canonical SlideDeck JSON.
+- Final enterprise sample quality: zero failed checks. Focused render/quality regression: 79 passed.
+
 ## 2026-08-02 public runtime recovery and composition expansion
 
 - Research and enterprise generation now have 24 native page-composition families. The design planner assigns a distinct composition where the deck size permits, and the delivery gate compares rendered PPTX geometry so repeated card/visual structures cannot pass as different layouts.
@@ -38,7 +47,7 @@
 - Verified kernel smoke: eight-slide expert render, all quality checks passed, PowerPoint 16.0 opened the file without repair and exported all slides to PNG.
 - The detailed implementation/acceptance backlog is in `docs/EXPERT_MODE_IMPROVEMENT_CHECKLIST.md`.
 
-Last updated: 2026-07-19
+Last updated: 2026-08-14
 
 ## What we are building
 

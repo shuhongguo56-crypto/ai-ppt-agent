@@ -39,6 +39,7 @@ ENTERPRISE_PPT_BASELINE_CHECKS = {
     "pptx_font_family_contract",
     "pptx_foreground_bounds",
     "pptx_text_fit_estimate",
+    "pptx_layout_discipline",
     "pptx_visible_copy_hygiene",
     "pptx_visible_copy_completeness",
     "pptx_text_encoding_integrity",
@@ -373,6 +374,19 @@ def check_render_quality(
                     "PPTX text frames have enough estimated height for visible copy."
                     if not text_fit_issues
                     else f"PPTX text may clip or overflow in slideshow mode: {', '.join(text_fit_issues[:6])}."
+                ),
+            }
+        )
+        layout_discipline_issues = _pptx_layout_discipline_issues(pptx_path)
+        checks.append(
+            {
+                "schemaVersion": "1.0.0",
+                "name": "pptx_layout_discipline",
+                "status": "passed" if not layout_discipline_issues else "failed",
+                "detail": (
+                    "PPTX uses one primary composition per page with no duplicate copy or unintended foreground overlap."
+                    if not layout_discipline_issues
+                    else f"PPTX layout discipline issues: {', '.join(layout_discipline_issues[:8])}."
                 ),
             }
         )
@@ -1453,7 +1467,7 @@ def _pptx_design_marker_count(path: Path) -> int:
                 count += 1
             if "EVIDENCE VIEW" in xml or "SECTION " in xml:
                 count += 1
-            if "Design Shape" in xml:
+            if "Design Shape" in xml or "Page Plan " in xml:
                 count += 1
     return count
 
@@ -1977,6 +1991,97 @@ def _pptx_text_fit_issues(path: Path) -> list[str]:
                 if required > int(cy * 1.08):
                     issues.append(f"{slide_label} {shape_name} needs {required}emu in {cy}emu")
     return issues[:12]
+
+
+def _pptx_layout_discipline_issues(path: Path) -> list[str]:
+    """Catch visual messiness that bounds and text-fit checks cannot see."""
+
+    issues: list[str] = []
+    with zipfile.ZipFile(path) as archive:
+        for name in archive.namelist():
+            if not name.startswith("ppt/slides/slide") or not name.endswith(".xml"):
+                continue
+            slide_match = re.search(r"slide(\d+)\.xml$", name)
+            slide_label = f"slide {slide_match.group(1)}" if slide_match else name
+            xml = archive.read(name).decode("utf-8", errors="ignore")
+            text_items: list[tuple[str, tuple[int, int, int, int], str]] = []
+            normalized_copy: dict[str, list[str]] = {}
+            card_count = 0
+            large_title_count = 0
+            for shape in re.findall(r"<p:sp>.*?</p:sp>", xml, flags=re.DOTALL):
+                name_match = re.search(r'<p:cNvPr id="\d+" name="([^"]+)"', shape)
+                if not name_match:
+                    continue
+                shape_name = name_match.group(1)
+                if shape_name == "Text 900" or not (
+                    shape_name.startswith("Text ") or shape_name.startswith("Card ")
+                ):
+                    continue
+                box = _pptx_shape_box(shape)
+                text = _pptx_shape_text(shape)
+                if box is None or not text:
+                    continue
+                text_items.append((shape_name, box, text))
+                if shape_name.startswith("Card "):
+                    card_count += 1
+                font_sizes = [int(value) for value in re.findall(r'<a:rPr\b[^>]*\bsz="(\d+)"', shape)]
+                if shape_name.startswith("Text ") and font_sizes and max(font_sizes) >= 3100:
+                    large_title_count += 1
+                key = re.sub(r"[^\w\u3400-\u9fff]+", "", html.unescape(text).casefold())
+                if len(key) >= 8:
+                    normalized_copy.setdefault(key, []).append(shape_name)
+
+            if card_count > 4:
+                issues.append(f"{slide_label} uses {card_count} cards")
+            if large_title_count > 1:
+                issues.append(f"{slide_label} has {large_title_count} competing title-sized text boxes")
+            for copies in normalized_copy.values():
+                if len(copies) > 1:
+                    issues.append(f"{slide_label} repeats visible copy in {'/'.join(copies[:2])}")
+                    break
+            for index, (left_name, left_box, _left_text) in enumerate(text_items):
+                for right_name, right_box, _right_text in text_items[index + 1 :]:
+                    if _box_overlap_ratio(left_box, right_box) >= 0.22:
+                        issues.append(f"{slide_label} overlaps {left_name}/{right_name}")
+                        break
+                else:
+                    continue
+                break
+
+            pictures = []
+            for picture in re.findall(r"<p:pic>.*?</p:pic>", xml, flags=re.DOTALL):
+                box = _pptx_shape_box(picture)
+                if box is not None and box[2] < int(SLIDE_CX * 0.9):
+                    pictures.append(box)
+            for shape_name, text_box, _text in text_items:
+                if any(_box_overlap_ratio(text_box, picture_box) >= 0.12 for picture_box in pictures):
+                    issues.append(f"{slide_label} places {shape_name} over a framed visual")
+                    break
+    return issues[:12]
+
+
+def _pptx_shape_box(shape_xml: str) -> tuple[int, int, int, int] | None:
+    match = re.search(
+        r'<a:off x="(-?\d+)" y="(-?\d+)"/><a:ext cx="(-?\d+)" cy="(-?\d+)"/>',
+        shape_xml,
+    )
+    if not match:
+        return None
+    return tuple(int(value) for value in match.groups())
+
+
+def _box_overlap_ratio(
+    left: tuple[int, int, int, int],
+    right: tuple[int, int, int, int],
+) -> float:
+    left_x, left_y, left_cx, left_cy = left
+    right_x, right_y, right_cx, right_cy = right
+    overlap_x = max(0, min(left_x + left_cx, right_x + right_cx) - max(left_x, right_x))
+    overlap_y = max(0, min(left_y + left_cy, right_y + right_cy) - max(left_y, right_y))
+    overlap = overlap_x * overlap_y
+    if overlap <= 0:
+        return 0.0
+    return overlap / max(1, min(left_cx * left_cy, right_cx * right_cy))
 
 
 def _xml_int_attr(attrs: str, name: str, fallback: int) -> int:

@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib import parse, request as urlrequest
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
 from ai_ppt_contracts import RenderResult, SlideDeck
 from app.ai.errors import ModelGatewayError
@@ -65,10 +65,14 @@ SCENE_INTENT_TERMS = {
     "production",
     "research",
     "road",
+    "seminar",
     "showroom",
     "studio",
     "students",
     "team",
+    "workshop",
+    "classroom",
+    "lecture",
 }
 SLIDE_CX = 12192000
 SLIDE_CY = 6858000
@@ -79,9 +83,9 @@ EMU_PER_POINT = 12700
 PPT_COVER_TITLE_MAX = 4800
 PPT_COVER_TITLE_MID = 4300
 PPT_COVER_TITLE_MIN = 3600
-PPT_PAGE_TITLE_MAX = 3600
-PPT_PAGE_TITLE_MID = 3300
-PPT_PAGE_TITLE_MIN = 2700
+PPT_PAGE_TITLE_MAX = 3800
+PPT_PAGE_TITLE_MID = 3500
+PPT_PAGE_TITLE_MIN = 3100
 PPT_STATEMENT_MAX = 2200
 PPT_STATEMENT_MID = 2000
 PPT_STATEMENT_MIN = 1800
@@ -447,6 +451,44 @@ def resolve_visual_assets(
             realesrgan_model=realesrgan_model,
             realesrgan_timeout_seconds=realesrgan_timeout_seconds,
         )
+        delivery_hash = _visual_asset_hash(asset.path)
+        if delivery_hash and delivery_hash in seen_image_hashes:
+            # Cached source files and newly downloaded originals can use
+            # different encodings for the same photograph.  The pre-upscale
+            # source gate cannot always see that relationship, so enforce
+            # uniqueness again on the exact bytes PowerPoint will embed.
+            asset = _write_owned_explainer_visual_asset(
+                slide.slide_index,
+                query,
+                assets_dir,
+                image_type=image_item.image_type,
+                purpose=image_item.purpose,
+                prompt=image_item.prompt,
+                provider_chain=list(image_item.provider_chain),
+                slide_title=slide.title,
+                slide_intent=slide.visual_intent,
+                composition_archetype=slide.design_plan.composition_archetype,
+                palette=page_palette,
+            )
+            source_hash = _visual_asset_hash(asset.path)
+            asset = _upgrade_visual_asset_for_expert_delivery(
+                asset,
+                slide=slide,
+                expert_mode=expert_mode,
+                normal_requirement=ImageResolutionRequirement(
+                    expert_image_min_long_edge,
+                    expert_image_min_short_edge,
+                    EXPERT_PAGE_RESOLUTION.label,
+                ),
+                key_requirement=ImageResolutionRequirement(
+                    expert_key_image_min_long_edge,
+                    expert_key_image_min_short_edge,
+                    EXPERT_KEY_PAGE_RESOLUTION.label,
+                ),
+                realesrgan_executable=realesrgan_executable,
+                realesrgan_model=realesrgan_model,
+                realesrgan_timeout_seconds=realesrgan_timeout_seconds,
+            )
         _write_cached_visual_asset(asset, assets_dir)
         promote_asset(asset, shared_asset_library_path)
         if source_hash:
@@ -699,6 +741,15 @@ def _read_cached_visual_asset(
     path = assets_dir / file_name
     if not path.is_file() or path.stat().st_size <= 0:
         return None
+    if source_type in {
+        "bing_image_search",
+        "wikipedia_page_image",
+        "wikimedia_commons_search",
+        "openverse_search",
+    }:
+        dimensions = raster_dimensions(path)
+        if dimensions is None or not _web_candidate_has_delivery_dimensions(*dimensions):
+            return None
     if _image_has_excessive_visible_text(path):
         return None
     return VisualAsset(
@@ -775,6 +826,7 @@ def _upgrade_visual_asset_for_expert_delivery(
     realesrgan_model: str,
     realesrgan_timeout_seconds: float,
 ) -> VisualAsset:
+    asset = _normalize_visual_asset_orientation(asset)
     dimensions = raster_dimensions(asset.path)
     if dimensions is None:
         return asset
@@ -820,14 +872,7 @@ def _upgrade_visual_asset_for_expert_delivery(
         timeout_seconds=realesrgan_timeout_seconds,
     )
     if upscaled_dimensions is None:
-        return replace(
-            asset,
-            width=original_width,
-            height=original_height,
-            original_width=original_width,
-            original_height=original_height,
-            resolution_profile=requirement.label,
-        )
+        return _resize_visual_asset_for_delivery(asset, requirement)
     width, height = upscaled_dimensions
     attribution = asset.attribution or "Visual asset"
     return replace(
@@ -843,6 +888,34 @@ def _upgrade_visual_asset_for_expert_delivery(
         original_height=original_height,
         upscaled=True,
         resolution_profile=requirement.label,
+    )
+
+
+def _normalize_visual_asset_orientation(asset: VisualAsset) -> VisualAsset:
+    """Bake EXIF orientation into pixels before PowerPoint embeds the image."""
+
+    try:
+        with Image.open(asset.path) as source:
+            orientation = source.getexif().get(274, 1)
+            if orientation in (None, 1):
+                return asset
+            normalized = ImageOps.exif_transpose(source).convert("RGB")
+            destination = asset.path.with_name(f"slide-{asset.slide_index}-oriented.png")
+            normalized.save(destination, format="PNG", optimize=True)
+            width, height = normalized.size
+    except (OSError, ValueError):
+        return asset
+    return replace(
+        asset,
+        path=destination,
+        rel_path=f"assets/{destination.name}",
+        file_name=destination.name,
+        mime_type="image/png",
+        width=width,
+        height=height,
+        original_width=width,
+        original_height=height,
+        attribution=f"{asset.attribution or 'Visual asset'} / EXIF orientation normalized",
     )
 
 
@@ -1006,7 +1079,7 @@ def _search_openverse_visual_asset(
                 continue
             width = int(item.get("width") or 0)
             height = int(item.get("height") or 0)
-            if width and height and (width < 640 or height < 360):
+            if width and height and not _web_candidate_has_delivery_dimensions(width, height):
                 continue
             image_url = str(item.get("url") or item.get("thumbnail") or "")
             if not image_url.lower().startswith("https://"):
@@ -1350,6 +1423,10 @@ def _search_wikipedia_page_visual_asset(
                 ):
                     path.unlink(missing_ok=True)
                     continue
+                dimensions = raster_dimensions(path)
+                if dimensions is None or not _web_candidate_has_delivery_dimensions(*dimensions):
+                    path.unlink(missing_ok=True)
+                    continue
                 if path.suffix.lower() != _extension_for_mime(actual_mime):
                     renamed = path.with_suffix(_extension_for_mime(actual_mime))
                     path.replace(renamed)
@@ -1425,6 +1502,10 @@ def _search_commons_visual_asset(
                 if mime_type not in {"image/jpeg", "image/png"}:
                     continue
                 if int(image_info.get("size") or 0) > MAX_IMAGE_BYTES:
+                    continue
+                width = int(image_info.get("width") or 0)
+                height = int(image_info.get("height") or 0)
+                if width and height and not _web_candidate_has_delivery_dimensions(width, height):
                     continue
                 image_url = str(image_info.get("url") or "")
                 if not image_url:
@@ -1932,6 +2013,12 @@ def _ai_education_page_job(lowered: str) -> str | None:
     if "hero content" in lowered or "generative ai in higher education" in lowered:
         return "cover"
     return None
+
+
+def _web_candidate_has_delivery_dimensions(width: int, height: int) -> bool:
+    """Require enough real pixels for a clean 16:9 or portrait slide crop."""
+
+    return max(width, height) >= 1280 and min(width, height) >= 720
 
 
 def _enterprise_ai_page_job(lowered: str) -> str | None:
@@ -3988,6 +4075,9 @@ def _write_hyperframes_html(deck: SlideDeck, path: Path, visual_assets: dict[int
       backdrop-filter: blur(20px);
       pointer-events: none;
     }}
+    .explainer-layer[data-render="metadata-only"] {{
+      display: none !important;
+    }}
     .explainer-node {{
       position: relative;
       z-index: 2;
@@ -4524,20 +4614,22 @@ def _asset_figure_html(asset: VisualAsset) -> str:
 
 
 def _explainer_html(slide) -> str:
+    """Expose explainer metadata without rendering a second card panel."""
+
     plan = slide.design_plan
     visual_brief = _clean_visible_text(plan.visual_brief, role="body", clip=False) or "outline-grounded explainer"
-    nodes = "".join(
-        f'<div class="explainer-node">{html.escape(clean_label)}</div>'
+    labels = " | ".join(
+        clean_label
         for label in plan.diagram_labels[:3]
         if (clean_label := _clean_visible_text(label, role="card", clip=False))
     )
     return (
         '<div class="explainer-layer" '
         f'data-explanation-mode="{html.escape(plan.explanation_mode)}" '
+        'data-render="metadata-only" '
         f'data-visual-brief="{html.escape(visual_brief)}" '
-        f'aria-label="{html.escape(visual_brief)}">'
-        '<div class="explainer-connector" aria-hidden="true"></div>'
-        f"{nodes}</div>"
+        f'data-diagram-labels="{html.escape(labels)}" '
+        'aria-hidden="true"><div class="explainer-connector"></div><div class="explainer-node"></div></div>'
     )
 
 
@@ -4812,9 +4904,16 @@ def _page_number_shape(slide, total_slides: int, accent: str) -> str:
 
 
 def _explainer_shapes(slide, fg: str, accent: str, soft: str) -> str:
+    """Keep the semantic explainer contract without drawing a second layout.
+
+    The canonical design plan already drives the native composition family.  A
+    second set of circles, rails and evidence panels used to be rendered on top
+    of that family, which made otherwise valid pages feel like two slides had
+    been composited together.  The invisible marker preserves QA/provenance;
+    the selected composition remains the single customer-visible explainer.
+    """
+
     plan = slide.design_plan
-    mode = plan.explanation_mode
-    labels: list[str] = []
     marker = _alpha_rect_shape(
         700,
         0,
@@ -4825,46 +4924,7 @@ def _explainer_shapes(slide, fg: str, accent: str, soft: str) -> str:
         0,
         name=f"Page Explainer {plan.explanation_mode}",
     )
-    if mode == "data_evidence" and plan.composition_archetype == "data_landscape":
-        geometry = [
-            _shape(704 + index, "roundRect", 8750000 + index * 620000, 4300000 - index * 420000, 360000, 850000 + index * 420000, accent, alpha=26000)
-            for index in range(4)
-        ]
-    elif mode == "data_evidence":
-        geometry = [
-            _shape(704, "roundRect", 7900000, 1900000, 1450000, 1100000, soft, alpha=18000, line=accent),
-            _shape(705, "roundRect", 9550000, 2520000, 1450000, 1000000, soft, alpha=18000, line=accent),
-            # Keep the third evidence highlight inside the upper-right image.
-            # A lower free-floating rectangle looked like an empty content card.
-            _shape(706, "roundRect", 8550000, 3080000, 1200000, 520000, soft, alpha=15000, line=accent),
-        ]
-    elif mode == "comparison_visual":
-        geometry = [
-            _shape(704, "roundRect", 6820000, 1740000, 2050000, 3300000, soft, alpha=18000, line=accent),
-            _shape(705, "roundRect", 9150000, 1740000, 2050000, 3300000, soft, alpha=18000, line=accent),
-            _alpha_rect_shape(706, 9020000, 2020000, 26000, 2700000, accent, 52000, name="Explainer Comparison Axis"),
-        ]
-    elif mode in {"process_diagram", "summary_map"}:
-        geometry = [
-            _alpha_rect_shape(704, 6900000, 5100000, 4100000, 28000, accent, 52000, name=f"Explainer Connector {mode}"),
-            *[
-                _shape(705 + index, "ellipse", 7000000 + index * 1900000, 4950000, 330000, 330000, accent, alpha=62000)
-                for index in range(3)
-            ],
-        ]
-    elif mode == "concept_diagram":
-        geometry = [
-            _shape(704, "ellipse", 8500000, 2300000, 1700000, 1700000, soft, alpha=18000, line=accent),
-            _shape(705, "ellipse", 7600000, 1600000, 520000, 520000, accent, alpha=52000),
-            _shape(706, "ellipse", 10400000, 1900000, 420000, 420000, accent, alpha=42000),
-            _shape(707, "ellipse", 10100000, 4300000, 620000, 620000, accent, alpha=36000),
-        ]
-    else:
-        geometry = [
-            _shape(704, "ellipse", 9200000, 1250000, 1450000, 1450000, accent, alpha=18000),
-            _shape(705, "ellipse", 10100000, 3650000, 520000, 520000, soft, alpha=42000, line=accent),
-        ]
-    return "\n".join([marker, *geometry, *_explainer_label_shapes(plan.explanation_mode, plan.composition_archetype, labels, fg, accent)])
+    return marker
 
 
 def _explainer_label_shapes(
@@ -5111,26 +5171,14 @@ def _page_backdrop_ornaments(slide, accent: str, soft: str, red: str, blue: str)
             [
                 _alpha_rect_shape(204, 520000, 560000, 54000, 5350000, accent, 82000, name="Cover Accent Spine"),
                 _alpha_rect_shape(205, 610000, 5960000, 5750000, 36000, accent, 50000, name="Cover Baseline"),
-                _shape(206, "ellipse", 9300000, 520000, 1480000, 1480000, blue, alpha=16000),
             ]
         )
     if archetype in {"chapter_index", "priority_stack", "step_ladder"}:
-        return "\n".join(
-            _alpha_rect_shape(204 + offset, 11100000 + offset * 170000, 720000, 42000, 4850000, accent, 38000 + offset * 9000, name="Vertical Rhythm")
-            for offset in range(3)
-        )
+        return _alpha_rect_shape(204, 11120000, 720000, 36000, 4850000, accent, 48000, name="Vertical Rhythm")
     if archetype in {"system_map", "statement_focus", "orbit_system"}:
-        return "\n".join(
-            [
-                _shape(204, "ellipse", 4240000, 1640000, 3740000, 3740000, soft, alpha=13000, line=accent),
-                _shape(205, "ellipse", 4920000, 2320000, 2380000, 2380000, blue, alpha=9000, line=accent),
-            ]
-        )
+        return ""
     if archetype in {"proof_mosaic", "data_landscape", "split_comparison", "evidence_matrix"}:
-        return "\n".join(
-            _shape(204 + offset, "roundRect", 9000000 + (offset % 2) * 720000, 800000 + (offset // 2) * 620000, 520000, 420000, accent if offset % 2 == 0 else soft, alpha=12000 + offset * 3000)
-            for offset in range(4)
-        )
+        return _alpha_rect_shape(204, 720000, 5720000, 3600000, 28000, accent, 44000, name="Evidence Baseline")
     if archetype in {"process_ribbon", "diagonal_story", "bridge_narrative", "gallery_strip"}:
         return "\n".join(
             [
@@ -5171,7 +5219,22 @@ def _treatment_pic_shape(slide, visual_asset: VisualAsset | None) -> str:
 
 def _render_block_limit(slide) -> int:
     design_plan = getattr(slide, "design_plan", None)
-    return 5 if getattr(design_plan, "composition_archetype", "") in {"system_map", "orbit_system"} else 4
+    archetype = getattr(design_plan, "composition_archetype", "")
+    limits = {
+        "cinematic_hero": 2,
+        "editorial_cover": 2,
+        "architectural_cover": 2,
+        "chapter_index": 3,
+        "statement_focus": 3,
+        "proof_mosaic": 3,
+        "system_map": 5,
+        "orbit_system": 4,
+        "closing_bloom": 2,
+        "manifesto_close": 1,
+        "future_horizon": 2,
+        "closing_echo": 1,
+    }
+    return limits.get(archetype, 4)
 
 
 def _content_blocks(slide, *, deck_title: str = "", max_blocks: int = 4) -> list:
@@ -5488,6 +5551,24 @@ def _topic_terms(value: str) -> set[str]:
         if word not in {"brand", "strategy", "growth", "study", "analysis", "presentation"}:
             terms.add(word)
     return terms
+
+
+def _copy_overlap_ratio(left: str, right: str) -> float:
+    """Estimate whether two visible phrases communicate the same headline."""
+
+    def units(value: str) -> set[str]:
+        cleaned = _clean_visible_text(value, role="body", clip=False).casefold()
+        normalized = _render_block_key(cleaned)
+        words = set(re.findall(r"[a-z0-9]{3,}", cleaned))
+        for chunk in re.findall(r"[\u3400-\u9fff]+", normalized):
+            words.update(chunk[index : index + 2] for index in range(max(0, len(chunk) - 1)))
+        return words
+
+    left_units = units(left)
+    right_units = units(right)
+    if not left_units or not right_units:
+        return 0.0
+    return len(left_units & right_units) / max(1, min(len(left_units), len(right_units)))
 
 
 def _layout_shapes(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
@@ -5834,18 +5915,17 @@ def _hero_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
     lead = blocks[0].content if blocks else slide.title
     support = blocks[1].content if len(blocks) > 1 else slide.speaker_notes
     subtitle = (
-        _text_shape(13, slide.subtitle, 740000, 2550000, 5300000, 360000, 1500, accent, bold=True)
+        _text_shape(13, slide.subtitle, 740000, 2750000, 5300000, 360000, 1500, accent, bold=True)
         if slide.subtitle
         else ""
     )
     return "\n".join(
         [
-            _shape(10, "roundRect", 7800000, 720000, 3300000, 4800000, soft, alpha=22000, line=accent),
-            _shape(11, "ellipse", 8400000, 900000, 2200000, 2200000, accent, alpha=52000),
             _text_shape(12, _ppt_title_text(slide.title), 720000, 900000, 6500000, 1450000, _ppt_title_font_size(_ppt_title_text(slide.title), cover=True), fg, bold=True),
             subtitle,
-            _card_shape(14, lead, 740000, 3300000, 6200000, 880000, soft, fg, accent),
-            _card_shape(15, support, 740000, 4400000, 6200000, 880000, soft, fg, accent),
+            _rect_shape(14, 740000, 3420000, 900000, 30000, accent),
+            _text_shape(15, lead, 740000, 3680000, 6000000, 900000, 1750, fg, bold=True),
+            (_text_shape(16, support, 740000, 4900000, 6000000, 600000, 1350, fg) if support and _copy_overlap_ratio(lead, support) < 0.72 else ""),
         ]
     )
 
@@ -5867,36 +5947,23 @@ def _editorial_cover_layout(slide, blocks: list, fg: str, accent: str, soft: str
 def _editorial_split_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
     lead = blocks[0].content if blocks else slide.visual_intent
     support = blocks[1:4] or blocks[:1]
-    cards: list[str] = []
-    if support:
-        cards.append(_card_shape(136, support[0].content, 6460000, 3360000, 4900000, 820000, soft, fg, accent))
-    lower = support[1:3]
-    if lower:
-        lower_cy = _uniform_card_height(
-            [(block.content, 2370000) for block in lower],
-            base_cy=1300000,
-        )
-        cards.extend(
-            _card_shape(
-                137 + index,
-                block.content,
-                6460000 + index * 2510000,
-                4380000,
-                2370000,
-                lower_cy,
-                soft,
-                fg,
-                accent,
-            )
-            for index, block in enumerate(lower)
+    support_shapes: list[str] = []
+    for index, block in enumerate(support[:2]):
+        y = 4000000 + index * 940000
+        support_shapes.extend(
+            [
+                _text_shape(136 + index * 2, f"0{index + 1}", 6460000, y, 520000, 360000, 1450, accent, bold=True),
+                _text_shape(137 + index * 2, block.content, 7120000, y - 20000, 4240000, 620000, 1450, fg),
+            ]
         )
     return "\n".join(
         [
             _rect_shape(130, 6460000, 680000, 760000, 42000, accent),
             _text_shape(131, _ppt_title_text(slide.title), 6460000, 970000, 4900000, 1300000, _ppt_title_font_size(_ppt_title_text(slide.title)), fg, bold=True),
             (_text_shape(132, slide.subtitle, 6480000, 2350000, 4850000, 420000, 1500, accent, bold=True) if slide.subtitle else ""),
-            _text_shape(133, lead, 6480000, 2350000, 4850000, 650000, 1500, fg, bold=True),
-            *cards,
+            _text_shape(133, lead, 6480000, 2740000, 4850000, 820000, 1750, fg, bold=True),
+            _rect_shape(134, 6480000, 3740000, 4880000, 26000, accent),
+            *support_shapes,
         ]
     )
 
@@ -5918,15 +5985,22 @@ def _chapter_index_layout(slide, blocks: list, fg: str, accent: str, soft: str) 
     items = blocks[:4] or blocks[:1]
     rows = []
     for index, block in enumerate(items):
-        y = 1880000 + index * 900000
+        y = 2200000 + index * 980000
         rows.extend(
             [
-                _text_shape(132 + index * 3, f"{index + 1:02d}", 760000, y, 620000, 420000, 1750, accent, bold=True),
-                _rect_shape(133 + index * 3, 1450000, y + 220000, 900000, 22000, accent),
-                _text_shape(134 + index * 3, block.content, 2520000, y - 20000, 7600000, 560000, 1700, fg),
+                _text_shape(132 + index * 3, f"{index + 1:02d}", 940000, y, 620000, 420000, 1750, accent, bold=True),
+                _rect_shape(133 + index * 3, 1640000, y + 210000, 720000, 20000, accent),
+                _text_shape(134 + index * 3, block.content, 2580000, y - 20000, 3650000, 560000, 1700, fg),
             ]
         )
-    return "\n".join([_title_and_subtitle(slide, fg, title_y=420000, title_size=3000), *rows])
+    return "\n".join(
+        [
+            _alpha_rect_shape(128, 520000, 420000, 6340000, 5720000, "FFFFFF", 86000, name="Agenda Reading Panel"),
+            _text_shape(129, _ppt_title_text(slide.title), 900000, 680000, 5440000, 900000, _ppt_title_font_size(_ppt_title_text(slide.title)), fg, bold=True),
+            (_text_shape(130, slide.subtitle, 930000, 1580000, 5200000, 330000, 1450, accent, bold=True) if slide.subtitle else ""),
+            *rows,
+        ]
+    )
 
 
 def _diagonal_story_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
@@ -5946,32 +6020,42 @@ def _diagonal_story_layout(slide, blocks: list, fg: str, accent: str, soft: str)
 
 
 def _statement_focus_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
-    statement = blocks[0].content if blocks else slide.title
-    support = blocks[1:4]
-    support_cy = _uniform_card_height(
-        [(block.content, 3200000) for block in support],
-        base_cy=1150000,
-    )
-    support_shapes = "\n".join(
-        _card_shape(155 + index, block.content, 740000 + index * 3600000, 4550000, 3200000, support_cy, soft, fg, accent)
-        for index, block in enumerate(support)
-    )
+    display_title = _ppt_title_text(slide.title)
+    statement = _premium_statement_copy(blocks[0].content if blocks else slide.title)
+    if _copy_overlap_ratio(display_title, statement) >= 0.72:
+        statement = ""
+    support = blocks[1:3]
+    support_shapes: list[str] = []
+    for index, block in enumerate(support):
+        support_shapes.extend(
+            [
+                _rect_shape(156 + index * 2, 940000 + index * 5540000, 4980000, 580000, 26000, accent),
+                _text_shape(157 + index * 2, block.content, 940000 + index * 5540000, 5170000, 4600000, 680000, 1500, fg),
+            ]
+        )
     return "\n".join(
         [
-            _text_shape(153, _ppt_title_text(slide.title), 720000, 480000, 10200000, 820000, _ppt_title_font_size(_ppt_title_text(slide.title)), accent, bold=True),
-            _text_shape(154, statement, 720000, 1450000, 9800000, 2350000, 3600, fg, bold=True),
-            support_shapes,
+            _text_shape(153, display_title, 940000, 760000, 10100000, 1180000, _ppt_title_font_size(display_title, cover=True), fg, bold=True),
+            (_text_shape(154, statement, 940000, 2240000, 9200000, 1650000, _ppt_statement_font_size(statement), fg, bold=True) if statement else ""),
+            _rect_shape(155, 940000, 4440000, 10100000, 30000, accent),
+            *support_shapes,
         ]
     )
 
 
 def _proof_mosaic_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
     cards = blocks[:4] or blocks[:1]
-    positions = [(720000, 1900000, 3250000, 1250000), (4200000, 1900000, 2200000, 1250000), (720000, 3440000, 2200000, 1250000), (3140000, 3440000, 3250000, 1250000)]
-    shapes = [
-        _card_shape(160 + index, block.content, *positions[index], soft, fg, accent)
-        for index, block in enumerate(cards[:4])
-    ]
+    shapes: list[str] = []
+    if cards:
+        shapes.append(_text_shape(160, cards[0].content, 760000, 1860000, 5500000, 1060000, 1850, fg, bold=True))
+    for index, block in enumerate(cards[1:3]):
+        y = 3480000 + index * 1040000
+        shapes.extend(
+            [
+                _rect_shape(161 + index * 2, 760000, y + 160000, 540000, 26000, accent),
+                _text_shape(162 + index * 2, block.content, 1460000, y, 4800000, 720000, 1450, fg),
+            ]
+        )
     return "\n".join(
         [
             _text_shape(5, _ppt_title_text(slide.title), 700000, 420000, 6100000, 920000, _ppt_title_font_size(_ppt_title_text(slide.title)), fg, bold=True),
@@ -5983,25 +6067,17 @@ def _proof_mosaic_layout(slide, blocks: list, fg: str, accent: str, soft: str) -
 
 def _system_map_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
     nodes = blocks[:5] or blocks[:1]
-    positions = [(700000, 2050000), (8300000, 1900000), (780000, 4200000), (8300000, 4180000)]
+    visible_nodes = nodes[1:5] if len(nodes) >= 5 else nodes[:4]
+    positions = [(720000, 1980000), (8520000, 1980000), (720000, 4300000), (8520000, 4300000)]
     shapes = [
-        _card_shape(166 + index, block.content, x, y, 3000000, 920000, soft, fg, accent)
-        for index, (block, (x, y)) in enumerate(zip(nodes[1:5] or nodes[:1], positions))
+        _card_shape(166 + index, block.content, x, y, 2920000, 880000, soft, fg, accent)
+        for index, (block, (x, y)) in enumerate(zip(visible_nodes, positions))
     ]
-    center_source = " ".join(
-        [str(getattr(slide, "title", "")), *(block.content for block in nodes[:1])]
-    )
-    if "增长飞轮" in center_source:
-        center = "增长飞轮"
-    else:
-        display_title = _ppt_title_text(slide.title)
-        center = display_title.split("：", 1)[-1].strip() if "：" in display_title else display_title
     return "\n".join(
         [
-            _title_and_subtitle(slide, fg, title_y=360000, title_size=2800),
-            _shape(164, "ellipse", 4400000, 2050000, 3300000, 3300000, soft, alpha=9000, line=accent),
-            _shape(165, "roundRect", 3550000, 1400000, 5100000, 620000, "FFFFFF", alpha=97000, line=accent),
-            _text_shape(171, center, 3820000, 1530000, 4560000, 300000, 1520, fg, bold=True, align="ctr", role="card"),
+            _text_shape(162, _ppt_title_text(slide.title), 900000, 520000, 10300000, 820000, _ppt_title_font_size(_ppt_title_text(slide.title)), fg, bold=True, align="ctr"),
+            (_text_shape(163, slide.subtitle, 1440000, 1390000, 9300000, 340000, 1420, accent, bold=True, align="ctr") if slide.subtitle else ""),
+            _shape(164, "ellipse", 4240000, 1780000, 3740000, 3740000, soft, alpha=7000, line=accent),
             *shapes,
         ]
     )
@@ -6026,20 +6102,15 @@ def _split_comparison_layout(slide, blocks: list, fg: str, accent: str, soft: st
 
 def _priority_stack_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
     items = blocks[:4] or blocks[:1]
-    cards = []
+    cards: list[str] = []
     for index, block in enumerate(items):
-        cards.append(
-            _card_shape(
-                180 + index,
-                block.content,
-                780000 + index * 620000,
-                1800000 + index * 1080000,
-                8500000 - index * 620000,
-                800000,
-                soft,
-                fg,
-                accent,
-            )
+        y = 1840000 + index * 1050000
+        cards.extend(
+            [
+                _text_shape(180 + index * 3, f"0{index + 1}", 820000, y, 600000, 420000, 1700, accent, bold=True),
+                _rect_shape(181 + index * 3, 1540000, y + 220000, 720000, 24000, accent),
+                _text_shape(182 + index * 3, block.content, 2460000, y - 40000, 6200000, 640000, 1450, fg),
+            ]
         )
     return "\n".join([_title_and_subtitle(slide, fg, title_y=390000, title_size=2900), *cards])
 
@@ -6215,18 +6286,13 @@ def _closing_bloom_layout(slide, blocks: list, fg: str, accent: str, soft: str) 
     """A full-bleed closing page with a protected central decision statement."""
 
     takeaway = blocks[0].content if blocks else slide.speaker_notes
-    support = blocks[1:3]
-    cards = [
-        _card_shape(315 + index, block.content, 2640000 + index * 3660000, 4880000, 3220000, 620000, soft, fg, accent)
-        for index, block in enumerate(support)
-    ]
+    support = blocks[1:2]
     return "\n".join(
         [
-            _shape(310, "ellipse", 5040000, 650000, 1960000, 1960000, accent, alpha=18000),
-            _text_shape(311, _ppt_title_text(slide.title), 1680000, 1760000, 8600000, 1050000, _ppt_title_font_size(_ppt_title_text(slide.title), cover=True), fg, bold=True, align="ctr"),
-            _text_shape(312, takeaway, 2600000, 3120000, 6600000, 880000, 1950, fg, align="ctr"),
-            _rect_shape(313, 4000000, 4420000, 4200000, 30000, accent),
-            *cards,
+            _text_shape(311, _ppt_title_text(slide.title), 1520000, 1520000, 9160000, 1320000, _ppt_title_font_size(_ppt_title_text(slide.title), cover=True), fg, bold=True, align="ctr"),
+            _text_shape(312, takeaway, 2320000, 3200000, 7560000, 920000, 1900, fg, align="ctr"),
+            _rect_shape(313, 4300000, 4470000, 3600000, 30000, accent),
+            (_text_shape(314, support[0].content, 3080000, 4860000, 6040000, 560000, 1350, fg, align="ctr") if support else ""),
         ]
     )
 
@@ -6245,17 +6311,18 @@ def _manifesto_close_layout(slide, blocks: list, fg: str, accent: str, soft: str
 
 def _future_horizon_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
     takeaway = blocks[0].content if blocks else slide.speaker_notes
-    supporting = blocks[1:4]
-    cards = "\n".join(
-        _card_shape(194 + index, block.content, 780000 + index * 3600000, 4550000, 3200000, 820000, soft, fg, accent)
-        for index, block in enumerate(supporting)
+    supporting = blocks[1:2]
+    support_text = (
+        supporting[0].content
+        if supporting and _copy_overlap_ratio(takeaway, supporting[0].content) < 0.72
+        else ""
     )
     return "\n".join(
         [
-            _text_shape(192, _ppt_title_text(slide.title), 920000, 1080000, 10100000, 1400000, _ppt_title_font_size(_ppt_title_text(slide.title), cover=True), fg, bold=True, align="ctr"),
-            _text_shape(193, takeaway, 1950000, 2850000, 8300000, 720000, 1900, fg, align="ctr"),
-            _rect_shape(198, 720000, 4120000, 10750000, 36000, accent),
-            cards,
+            _text_shape(192, _ppt_title_text(slide.title), 1320000, 1260000, 9560000, 1320000, _ppt_title_font_size(_ppt_title_text(slide.title), cover=True), fg, bold=True, align="ctr"),
+            _text_shape(193, takeaway, 2100000, 3020000, 8000000, 820000, 1900, fg, align="ctr"),
+            _rect_shape(198, 3860000, 4260000, 4480000, 32000, accent),
+            (_text_shape(199, support_text, 2800000, 4700000, 6600000, 620000, 1400, fg, align="ctr") if support_text else ""),
         ]
     )
 

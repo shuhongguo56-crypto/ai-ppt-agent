@@ -448,6 +448,34 @@ def test_free_generated_visual_uses_clean_delivery_resize_not_neural_upscale(tmp
     assert render_service.raster_dimensions(resized.path) == (1920, 1080)
 
 
+def test_visual_asset_bakes_exif_orientation_before_powerpoint_embedding(tmp_path) -> None:
+    source = tmp_path / "portrait-tagged.jpg"
+    exif = Image.Exif()
+    exif[274] = 6
+    Image.new("RGB", (80, 120), "#43607A").save(source, format="JPEG", exif=exif)
+    asset = render_service.VisualAsset(
+        slide_index=8,
+        path=source,
+        rel_path=f"assets/{source.name}",
+        file_name=source.name,
+        mime_type="image/jpeg",
+        source_type="wikimedia_commons_search",
+        alt="Closing visual",
+        query="university field study",
+        image_type="thesis_concept",
+        purpose="Show a field study",
+        prompt="licensed field study photograph",
+        provider_chain=["open_web_search"],
+    )
+
+    normalized = render_service._normalize_visual_asset_orientation(asset)
+
+    assert normalized.file_name == "slide-8-oriented.png"
+    assert render_service.raster_dimensions(normalized.path) == (120, 80)
+    with Image.open(normalized.path) as output:
+        assert output.getexif().get(274) is None
+
+
 def create_renderable_deck(client) -> dict:
     assert client.post("/api/projects", json=PROJECT).status_code == 201
     outline = client.post("/api/projects/project-render/outline/generate", json={})
@@ -877,7 +905,7 @@ def test_render_creates_pptx_and_hyperframes_from_same_slide_deck(client) -> Non
     assert "EVIDENCE VIEW" not in slide5
     assert 'name="Text 132"' in slide2
     assert 'name="Design Shape 164"' in slide_xml[3]
-    assert 'name="Card 160"' in slide5
+    assert 'name="Text 160"' in slide5
     assert 'name="Text 154"' in slide_xml[5]
     assert "Closing Horizon" in slide_xml[-1]
     assert "CORE MESSAGE" not in slide1
@@ -920,6 +948,8 @@ def test_open_visual_search_uses_wikipedia_page_images_without_bing_key(tmp_path
     monkeypatch.setattr(render_service, "_read_json_url", fake_read_json_url)
     monkeypatch.setattr(render_service, "_download_binary", fake_download_binary)
     monkeypatch.setattr(render_service, "_image_has_excessive_visible_text", lambda _path: False)
+    monkeypatch.setattr(render_service, "raster_dimensions", lambda _path: (1920, 1080))
+    monkeypatch.setattr(render_service, "_web_candidate_has_delivery_dimensions", lambda *_dimensions: True)
 
     asset = render_service._search_open_visual_asset(
         1,
@@ -1179,6 +1209,14 @@ def test_licensed_candidate_requires_page_specific_relevance() -> None:
     assert render_service._candidate_metadata_is_relevant(
         "automotive battery manufacturing factory production line",
         "automotive battery manufacturing",
+    ) is True
+    assert render_service._candidate_metadata_is_relevant(
+        "Gombe state university students on field studies",
+        "university students seminar",
+    ) is False
+    assert render_service._candidate_metadata_is_relevant(
+        "University students in an interactive seminar discussion",
+        "university students seminar",
     ) is True
     assert render_service._candidate_metadata_is_relevant("凌空抽射", "落地路径") is False
     assert render_service._candidate_metadata_is_relevant("香港—深圳边界", "背景边界") is False

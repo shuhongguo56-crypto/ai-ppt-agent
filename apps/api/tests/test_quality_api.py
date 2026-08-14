@@ -139,6 +139,7 @@ def test_quality_check_passes_for_rendered_artifacts(client) -> None:
         "pptx_font_family_contract",
         "pptx_foreground_bounds",
         "pptx_text_fit_estimate",
+        "pptx_layout_discipline",
         "pptx_visible_copy_hygiene",
         "pptx_visible_copy_completeness",
         "pptx_text_encoding_integrity",
