@@ -199,11 +199,12 @@ def _prompt(
         690,
     ).strip(" |")
     contract = (
-        "award-winning corporate presentation standard, brand-uniform, judge-ready | "
-        "premium keynote quality with layered foreground/midground/background and cinematic depth | "
+        "award-winning Fortune 500 corporate presentation standard, brand-uniform, boardroom-ready | "
+        "authentic editorial photography or museum-grade conceptual still life, never generic stock imagery | "
+        "premium keynote quality with layered foreground/midground/background, controlled lighting, tactile material detail, and cinematic depth | "
         "strong contrast hierarchy, deliberate negative space, and a single focal subject | "
-        "protected clean text zone for editable PowerPoint copy | "
-        "no visible text, no labels, no logos, no watermark"
+        "protected clean text zone matched to the requested composition for editable PowerPoint copy | "
+        "no collage, no dashboard, no handshake cliche, no visible screens with text, no labels, no logos, no watermark"
     )
     return f"{semantic_body} | {contract}"
 

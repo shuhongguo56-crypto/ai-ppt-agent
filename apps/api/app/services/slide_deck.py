@@ -592,10 +592,12 @@ def _title_source_is_incomplete(value: str) -> bool:
 
 
 _AWARD_IMAGE_PROMPT_CONTRACT = (
-    "award-winning corporate presentation standard, judge-ready | "
-    "strong contrast hierarchy with deliberate negative space and a single focal subject | "
-    "protected clean text zone for editable PowerPoint copy | "
-    "no visible text, no labels, no logos, no watermark"
+    "award-winning Fortune 500 corporate presentation standard, brand-uniform, boardroom-ready | "
+    "authentic editorial photography or museum-grade conceptual still life, never generic stock imagery | "
+    "controlled lighting, tactile material detail, cinematic depth, and a single focal subject | "
+    "strong contrast hierarchy with deliberate negative space | "
+    "protected clean text zone matched to the requested composition for editable PowerPoint copy | "
+    "no collage, no dashboard, no handshake cliche, no visible screens with text, no labels, no logos, no watermark"
 )
 
 
@@ -610,6 +612,7 @@ def _repair_image_prompt(page_subject: str, original_prompt: str) -> str:
 
     contract_markers = (
         "award-winning corporate presentation standard",
+        "award-winning fortune 500 corporate presentation standard",
         "strong contrast hierarchy with deliberate negative space",
         "protected clean text zone for editable powerpoint copy",
         "no visible text, no labels, no logos, no watermark",

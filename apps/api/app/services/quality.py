@@ -40,6 +40,7 @@ ENTERPRISE_PPT_BASELINE_CHECKS = {
     "pptx_foreground_bounds",
     "pptx_text_fit_estimate",
     "pptx_layout_discipline",
+    "pptx_executive_readability",
     "pptx_visible_copy_hygiene",
     "pptx_visible_copy_completeness",
     "pptx_text_encoding_integrity",
@@ -67,6 +68,7 @@ ENTERPRISE_PPT_BASELINE_CHECKS = {
     "research_page_delivery_contract",
     "research_visual_delivery_contract",
     "competition_ppt_baseline",
+    "fortune_500_delivery_contract",
     "customer_delivery_readiness",
 }
 
@@ -390,6 +392,21 @@ def check_render_quality(
                 ),
             }
         )
+        executive_readability_issues = _pptx_executive_readability_issues(pptx_path)
+        checks.append(
+            {
+                "schemaVersion": "1.0.0",
+                "name": "pptx_executive_readability",
+                "status": "passed" if not executive_readability_issues else "failed",
+                "detail": (
+                    "PPTX maintains a boardroom-readable type hierarchy: one dominant action title and presentation-distance body copy."
+                    if not executive_readability_issues
+                    else "PPTX executive readability issues: "
+                    + ", ".join(executive_readability_issues[:8])
+                    + "."
+                ),
+            }
+        )
         pptx_copy_issues = _pptx_visible_copy_issues(pptx_path)
         checks.append(
             {
@@ -583,6 +600,7 @@ def check_render_quality(
 
     if quality_profile in {"enterprise_ppt", "competition_ppt"}:
         checks.extend(_competition_grade_checks(slide_deck))
+        checks.append(_fortune_500_delivery_contract_check(checks))
         checks.append(_customer_delivery_readiness_check(checks))
         checks.append(_enterprise_ppt_baseline_check(checks))
 
@@ -633,6 +651,7 @@ def _customer_delivery_readiness_check(checks: list[dict[str, str]]) -> dict[str
         "pptx_font_family_contract",
         "pptx_foreground_bounds",
         "pptx_text_fit_estimate",
+        "pptx_executive_readability",
         "pptx_visible_copy_hygiene",
         "pptx_visible_copy_completeness",
         "pptx_text_encoding_integrity",
@@ -643,6 +662,7 @@ def _customer_delivery_readiness_check(checks: list[dict[str, str]]) -> dict[str
         "html_text_encoding_integrity",
         "competition_ppt_baseline",
         "award_grade_design_contract",
+        "fortune_500_delivery_contract",
         "research_storyline_contract",
         "research_topic_grounding",
         "research_evidence_logic_contract",
@@ -660,6 +680,45 @@ def _customer_delivery_readiness_check(checks: list[dict[str, str]]) -> dict[str
             "Deck is ready for customer delivery: PPTX opens safely, HTML presents with motion, visuals are real/generated assets, copy is clean, and the award-grade story/design contract passed."
             if not failed
             else "Deck is not ready for customer delivery; repair required for: "
+            + ", ".join(failed[:12])
+            + ("." if len(failed) <= 12 else ", ...")
+        ),
+    }
+
+
+def _fortune_500_delivery_contract_check(checks: list[dict[str, str]]) -> dict[str, str]:
+    """Internal boardroom-delivery baseline, not a third-party certification."""
+
+    required = {
+        "competition_story_arc",
+        "competition_copy_density",
+        "competition_visual_variety",
+        "competition_image_intent",
+        "award_grade_design_contract",
+        "visual_asset_source_quality",
+        "visual_asset_resolution_quality",
+        "visual_asset_license_readiness",
+        "visual_asset_uniqueness",
+        "pptx_visual_placement_diversity",
+        "pptx_layout_structure_diversity",
+        "pptx_font_family_contract",
+        "pptx_foreground_bounds",
+        "pptx_text_fit_estimate",
+        "pptx_layout_discipline",
+        "pptx_executive_readability",
+        "pptx_visible_copy_completeness",
+        "pptx_text_encoding_integrity",
+    }
+    status_by_name = {check["name"]: check["status"] for check in checks}
+    failed = sorted(name for name in required if status_by_name.get(name) != "passed")
+    return {
+        "schemaVersion": "1.0.0",
+        "name": "fortune_500_delivery_contract",
+        "status": "passed" if not failed else "failed",
+        "detail": (
+            "Deck passes the internal Fortune-500-style boardroom contract: decision-led narrative, disciplined brand system, presentation-distance typography, page-specific visuals, and production-safe geometry."
+            if not failed
+            else "Deck does not yet meet the internal Fortune-500-style boardroom contract; repair required for: "
             + ", ".join(failed[:12])
             + ("." if len(failed) <= 12 else ", ...")
         ),
@@ -1799,6 +1858,8 @@ def _pptx_foreground_bounds_issues(path: Path) -> list[str]:
 
 
 def _visual_asset_source_quality(render_dir: Path, expected_slide_count: int) -> dict[str, object]:
+    from app.services.render import _image_has_excessive_visible_text
+
     assets_dir = render_dir / "assets"
     issues: list[str] = []
     usable = 0
@@ -1823,6 +1884,9 @@ def _visual_asset_source_quality(render_dir: Path, expected_slide_count: int) ->
             continue
         source_type = str(data.get("sourceType") or "")
         file_name = str(data.get("fileName") or "")
+        if not file_name or Path(file_name).name != file_name:
+            issues.append(f"slide {slide_index} invalid image file")
+            continue
         asset_path = assets_dir / file_name
         if source_type not in accepted:
             issues.append(f"slide {slide_index} source={source_type or 'missing'}")
@@ -1833,6 +1897,9 @@ def _visual_asset_source_quality(render_dir: Path, expected_slide_count: int) ->
             continue
         if not file_name or not asset_path.exists() or asset_path.stat().st_size <= 0:
             issues.append(f"slide {slide_index} missing image file")
+            continue
+        if _image_has_excessive_visible_text(asset_path):
+            issues.append(f"slide {slide_index} visible watermark or excessive image text")
             continue
         usable += 1
     return {"passed": usable >= expected_slide_count and not issues, "usable": usable, "issues": issues[:12]}
@@ -2057,6 +2124,54 @@ def _pptx_layout_discipline_issues(path: Path) -> list[str]:
                 if any(_box_overlap_ratio(text_box, picture_box) >= 0.12 for picture_box in pictures):
                     issues.append(f"{slide_label} places {shape_name} over a framed visual")
                     break
+    return issues[:12]
+
+
+def _pptx_executive_readability_issues(path: Path) -> list[str]:
+    """Enforce meeting-room typography and one dominant action headline."""
+
+    issues: list[str] = []
+    with zipfile.ZipFile(path) as archive:
+        for name in archive.namelist():
+            if not name.startswith("ppt/slides/slide") or not name.endswith(".xml"):
+                continue
+            slide_match = re.search(r"slide(\d+)\.xml$", name)
+            slide_label = f"slide {slide_match.group(1)}" if slide_match else name
+            xml = archive.read(name).decode("utf-8", errors="ignore")
+            dominant_titles = 0
+            for shape in re.findall(r"<p:sp>.*?</p:sp>", xml, flags=re.DOTALL):
+                name_match = re.search(r'<p:cNvPr id="\d+" name="([^"]+)"', shape)
+                if not name_match:
+                    continue
+                shape_name = name_match.group(1)
+                if shape_name == "Text 900" or not (
+                    shape_name.startswith("Text ") or shape_name.startswith("Card ")
+                ):
+                    continue
+                text = _pptx_shape_text(shape)
+                sizes = [int(value) for value in re.findall(r'<a:rPr\b[^>]*\bsz="(\d+)"', shape)]
+                if not text or not sizes:
+                    continue
+                minimum = min(sizes)
+                maximum = max(sizes)
+                if shape_name.startswith("Text ") and maximum >= 3100:
+                    dominant_titles += 1
+                    continue
+                visible_weight = sum(
+                    2 if "\u3400" <= character <= "\u9fff" else 1
+                    for character in text
+                    if not character.isspace()
+                )
+                if visible_weight < 14:
+                    continue
+                if shape_name.startswith("Card ") and minimum < 1600:
+                    issues.append(f"{slide_label} {shape_name} uses {minimum / 100:.1f}pt card copy")
+                    break
+                if shape_name.startswith("Text ") and minimum < 1500:
+                    issues.append(f"{slide_label} {shape_name} uses {minimum / 100:.1f}pt body copy")
+                    break
+            if dominant_titles != 1:
+                issues.append(f"{slide_label} has {dominant_titles} dominant action titles")
     return issues[:12]
 
 

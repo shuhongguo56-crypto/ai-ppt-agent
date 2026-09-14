@@ -88,10 +88,10 @@ PPT_PAGE_TITLE_MID = 3500
 PPT_PAGE_TITLE_MIN = 3100
 PPT_STATEMENT_MAX = 2200
 PPT_STATEMENT_MID = 2000
-PPT_STATEMENT_MIN = 1800
-PPT_CARD_MAX = 1800
-PPT_CARD_MID = 1650
-PPT_CARD_MIN = 1300
+PPT_STATEMENT_MIN = 1900
+PPT_CARD_MAX = 2000
+PPT_CARD_MID = 1800
+PPT_CARD_MIN = 1600
 REF_DARK = "080A0F"
 REF_PANEL = "111216"
 REF_INK = "F8F3E7"
@@ -1010,6 +1010,9 @@ def _search_open_visual_asset(
                 prompt=prompt,
                 provider_chain=provider_chain,
                 timeout_seconds=timeout_seconds,
+                **({"excluded_hashes": excluded_hashes} if searcher in {
+                    _search_commons_visual_asset, _search_openverse_visual_asset,
+                } else {}),
             )
             if asset is not None:
                 # A source can surface the same photo for several related
@@ -1034,6 +1037,7 @@ def _search_openverse_visual_asset(
     prompt: str,
     provider_chain: list[str],
     timeout_seconds: float | None,
+    excluded_hashes: set[str] | None = None,
 ) -> VisualAsset | None:
     search_url = "https://api.openverse.org/v1/images/?" + parse.urlencode(
         {
@@ -1087,11 +1091,13 @@ def _search_openverse_visual_asset(
             extension = _extension_for_mime_from_url(image_url)
             file_name = f"slide-{slide_index}-openverse{extension}"
             path = assets_dir / file_name
-            actual_mime = _download_binary(
-                image_url,
-                path,
-                timeout=_image_search_timeout(timeout_seconds),
-            )
+            try:
+                actual_mime = _download_binary(
+                    image_url, path, timeout=_image_search_timeout(timeout_seconds),
+                )
+            except (OSError, ValueError, TimeoutError):
+                path.unlink(missing_ok=True)
+                continue
             if (
                 actual_mime not in {"image/jpeg", "image/png"}
                 or not path.is_file()
@@ -1101,6 +1107,9 @@ def _search_openverse_visual_asset(
                 path.unlink(missing_ok=True)
                 continue
             correct_extension = _extension_for_mime(actual_mime)
+            if excluded_hashes and _visual_asset_hash(path) in excluded_hashes:
+                path.unlink(missing_ok=True)
+                continue
             if path.suffix.lower() != correct_extension:
                 renamed = path.with_suffix(correct_extension)
                 path.replace(renamed)
@@ -1184,10 +1193,10 @@ def _commons_candidate_score(
     """
     title = str(page.get("title") or "")
     attribution = _commons_attribution(image_info) or ""
-    metadata = f"{title} {attribution}".casefold()
+    metadata = _commons_search_metadata(page, image_info).casefold()
     score = _openverse_candidate_score(
         {
-            "title": title,
+            "title": metadata,
             "tags": [],
             "width": int(image_info.get("width") or 0),
             "height": int(image_info.get("height") or 0),
@@ -1224,6 +1233,17 @@ def _commons_candidate_score(
     if any(term in metadata for term in ("chart", "diagram", "poster", "document", "screenshot")):
         score -= 20
     return score
+
+
+def _commons_search_metadata(page: dict, image_info: dict) -> str:
+    # File titles often omit the actual activity. The catalogue description is
+    # evidence for what is depicted; artist and licence names are not.
+    external = image_info.get("extmetadata") or {}
+    values = [str(page.get("title") or "")]
+    for key in ("ObjectName", "ImageDescription", "Categories"):
+        value = str((external.get(key) or {}).get("value") or "")
+        values.append(html.unescape(re.sub(r"<[^>]+>", " ", value)))
+    return " ".join(values)
 
 
 def _openverse_candidate_metadata(item: dict) -> str:
@@ -1360,6 +1380,10 @@ def _image_has_excessive_visible_text(path: Path) -> bool:
     except (OSError, subprocess.TimeoutExpired):
         return False
     scanned = "".join(re.findall(r"[a-z0-9]{3,}", (result.stdout or "").casefold()))
+    # A provider watermark is often much shorter than the body-copy threshold.
+    # Requesting nologo does not prove the returned pixels are watermark-free.
+    if any(marker in scanned for marker in ("pollinations", "shutterstock", "gettyimages", "istock", "alamy")):
+        return True
     try:
         threshold = int(os.getenv("AI_PPT_IMAGE_TEXT_SCAN_MIN_CHARS", "40"))
     except ValueError:
@@ -1462,6 +1486,7 @@ def _search_commons_visual_asset(
     prompt: str,
     provider_chain: list[str],
     timeout_seconds: float | None,
+    excluded_hashes: set[str] | None = None,
 ) -> VisualAsset | None:
     search_url = "https://commons.wikimedia.org/w/api.php?" + parse.urlencode(
         {
@@ -1488,14 +1513,7 @@ def _search_commons_visual_asset(
             for image_info in page.get("imageinfo") or []:
                 if not isinstance(image_info, dict):
                     continue
-                candidate_metadata = " ".join(
-                    part
-                    for part in (
-                        str(page.get("title") or ""),
-                        _commons_attribution(image_info) or "",
-                    )
-                    if part
-                )
+                candidate_metadata = _commons_search_metadata(page, image_info)
                 if not _candidate_metadata_is_relevant(candidate_metadata, query):
                     continue
                 mime_type = str(image_info.get("mime") or "")
@@ -1530,7 +1548,14 @@ def _search_commons_visual_asset(
             extension = _extension_for_mime(mime_type)
             file_name = f"slide-{slide_index}-commons{extension}"
             path = assets_dir / file_name
-            actual_mime = _download_binary(image_url, path, timeout=_image_search_timeout(timeout_seconds))
+            try:
+                actual_mime = _download_binary(image_url, path, timeout=_image_search_timeout(timeout_seconds))
+            except (OSError, ValueError, TimeoutError):
+                path.unlink(missing_ok=True)
+                continue
+            if excluded_hashes and path.is_file() and _visual_asset_hash(path) in excluded_hashes:
+                path.unlink(missing_ok=True)
+                continue
             if (
                 actual_mime not in {"image/jpeg", "image/png"}
                 or not path.is_file()
@@ -1765,6 +1790,28 @@ def _ai_image_generation_prompt(
             f"Palette: {', '.join(palette)}. "
             "Style: award-grade academic editorial photography, restrained, believable, and presentation-ready."
         )
+    # Enterprise-AI decks also contain words such as dashboard, evidence,
+    # diagram, and operating system. Those words describe the argument, not a
+    # request to draw an interface. Route the deck through a concrete physical
+    # business scene before the generic text-risk fallback. This keeps the OCR
+    # safety contract while making every asset explain its own story beat.
+    if _is_enterprise_ai_content(semantic_cues):
+        page_job = _enterprise_ai_page_job(semantic_cues.casefold()) or purpose
+        scene_direction = _enterprise_ai_scene_direction(str(page_job), semantic_subject)
+        return (
+            f"Concrete semantic subject: {semantic_subject}. "
+            f"Visible story beat: {scene_direction}. "
+            "Create a premium cinematic 16:9 editorial photograph of this exact enterprise situation. "
+            "The main action and spatial structure must make the business argument understandable without a caption; "
+            "do not replace the requested situation with generic glassware, decorative blobs, a lone laptop, or an empty boardroom. "
+            "Use authentic senior leaders, operators, engineers, or frontline staff only where specified, with natural gestures and credible working context. "
+            "Represent workflow, evidence, stages, gates, and control through real people, physical zones, unmarked modular objects, light, and architecture. "
+            "ABSOLUTELY NO visible text, letters, numbers, screens, devices, interfaces, charts, logos, badges, watermarks, documents, labels, signage, or pseudo-writing. "
+            "All papers, boards, objects, and surfaces must be blank and unmarked. "
+            "Use a decisive focal action, layered foreground/midground/background, natural depth of field, premium directional light, and generous quiet negative space. "
+            f"Palette: {', '.join(palette)}. "
+            "Style: Fortune-500 boardroom editorial photography, restrained, credible, globally inclusive, presentation-ready, no collage, no infographic, no typography."
+        )
     if _is_text_risk_image_type(image_type) or _requires_text_safe_conclusion_visual(
         query,
         image_prompt,
@@ -1855,6 +1902,98 @@ def _is_ai_education_content(value: str) -> bool:
     )
     return any(marker in lowered for marker in ai_markers) and any(
         marker in lowered for marker in education_markers
+    )
+
+
+def _is_enterprise_ai_content(value: str) -> bool:
+    """Identify enterprise-AI operating-model content before text-risk routing."""
+
+    lowered = f" {value.casefold()} "
+    ai_markers = (
+        " ai ",
+        "artificial intelligence",
+        "agentic",
+        " ai agent",
+        " ai-enabled",
+        "intelligent automation",
+        "人工智能",
+        "智能体",
+        "智能自动化",
+    )
+    enterprise_markers = (
+        "enterprise",
+        "business",
+        "organization",
+        "operating model",
+        "workflow",
+        "executive",
+        "leadership",
+        "operations",
+        "transformation",
+        "企业",
+        "业务",
+        "组织",
+        "运营",
+        "管理层",
+        "转型",
+    )
+    return any(marker in lowered for marker in ai_markers) and any(
+        marker in lowered for marker in enterprise_markers
+    )
+
+
+def _enterprise_ai_scene_direction(page_job: str, semantic_subject: str) -> str:
+    """Turn an executive story beat into a visible, no-text physical scene.
+
+    Free image providers respond much better to a concrete action plus spatial
+    constraint than to an abstract strategy noun. Every beat below has a
+    different cast, location, focal action, and composition so a nine-page
+    deck cannot collapse into one repeated right-hand boardroom photograph.
+    """
+
+    directions = {
+        "cover": (
+            "a small cross-functional executive team gathers around a large blank modular workflow model; "
+            "one leader moves a single control piece from an isolated prototype zone into a connected operating network, "
+            "wide architectural composition with open negative space"
+        ),
+        "agenda": (
+            "four clearly separated architectural thresholds recede through one modern workplace; "
+            "a team advances from an isolated experiment through ownership, measurement, and scale-review zones, "
+            "each threshold visibly distinct without symbols or labels"
+        ),
+        "context": (
+            "an attractive isolated prototype sits under a spotlight while, deeper in the same scene, a staffed operational line reveals many handoffs and dependencies; "
+            "the contrast visibly shows why pilot success is not proof of scalable operations"
+        ),
+        "framework": (
+            "four linked physical workstations form one continuous value chain from human request to coordinated process, observable outcome, and executive value review; "
+            "people pass one unmarked object through every stage with no broken handoff"
+        ),
+        "insight": (
+            "a crowded workflow narrows through one visible operational chokepoint where a business owner, engineer, and frontline operator coordinate the handoff; "
+            "the bottleneck is clearly ownership and process orchestration, not computing hardware"
+        ),
+        "evidence": (
+            "a measurement review in a quiet operations studio uses three physically distinct blank evidence stations for baseline, causal attribution, and risk boundary; "
+            "a decision team compares the stations with calibrated but completely unmarked instruments"
+        ),
+        "recommendation": (
+            "a delivery team moves through four sequential physical work zones representing mandate, instrument, pilot, and review across a 90-day implementation; "
+            "ownership transfers visibly from executive sponsor to operators and back to the review table"
+        ),
+        "scale_gate": (
+            "three parallel controlled lanes converge on one guarded scale threshold; "
+            "leaders inspect value, human adoption, and operational reliability together before opening the final passage"
+        ),
+        "conclusion": (
+            "a resilient automated physical process runs across the scene while a human supervisor remains visibly able to pause, reroute, and recover it from a central manual control point; "
+            "the image communicates owned operations rather than an autonomous black box"
+        ),
+    }
+    return directions.get(
+        page_job,
+        f"a credible cross-functional enterprise team performs this specific action in a real operating environment: {semantic_subject}",
     )
 
 
@@ -2481,7 +2620,78 @@ def _write_owned_explainer_visual_asset(
     surface_soft = blend(bg, support, 0.30)
     highlight = blend(ink, (255, 255, 255), 0.34)
 
-    if image_type in {"background", "course_review_atmosphere", "business_scene"}:
+    if composition_archetype == "chapter_index":
+        # A vertical editorial route designed for the narrow chapter-index
+        # image window. The focal stack stays centered after aspect-fill crop.
+        draw.line((800, 160, 800, 740), fill=(*highlight, 66), width=5)
+        stage_boxes = [
+            (596, 186, 1004, 292),
+            (646, 322, 1054, 428),
+            (546, 458, 954, 564),
+            (620, 594, 1028, 700),
+        ]
+        for index, box in enumerate(stage_boxes):
+            stage_color = accent if index in {0, 3} else support
+            glass_panel(box, stage_color, radius=30, alpha=154)
+            draw.ellipse(
+                (box[0] + 34, box[1] + 30, box[0] + 80, box[1] + 76),
+                fill=(*highlight, 138),
+            )
+            draw.line(
+                (box[0] + 108, (box[1] + box[3]) // 2, box[2] - 42, (box[1] + box[3]) // 2),
+                fill=(*highlight, 54),
+                width=5,
+            )
+        draw.ellipse((736, 90, 864, 218), fill=(*surface, 220), outline=(*accent, 146), width=5)
+        draw.arc((758, 112, 842, 196), start=18, end=304, fill=(*highlight, 186), width=7)
+    elif composition_archetype == "statement_focus":
+        # One asymmetric judgement lens: a large focal disc, evidence orbit,
+        # and a grounded counterweight. This is intentionally unlike the
+        # closing horizon geometry.
+        draw.ellipse((314, 152, 1002, 840), fill=(*support, 92), outline=(*highlight, 68), width=3)
+        draw.ellipse((436, 274, 880, 718), fill=(*accent, 168), outline=(*highlight, 94), width=4)
+        draw.ellipse((566, 404, 750, 588), fill=(*surface, 232))
+        for inset, start in ((58, 18), (102, 112), (150, 224)):
+            draw.arc(
+                (314 - inset, 152 - inset, 1002 + inset, 840 + inset),
+                start=start,
+                end=start + 118,
+                fill=(*highlight, 118),
+                width=8,
+            )
+        glass_panel((1082, 250, 1334, 694), surface_soft, radius=46, alpha=142)
+        draw.line((1108, 612, 1304, 332), fill=(*accent, 186), width=14)
+        draw.ellipse((1262, 290, 1318, 346), fill=(*highlight, 210))
+    elif composition_archetype in {"closing_bloom", "closing_echo", "future_horizon", "manifesto_close"}:
+        # A receding strategy horizon provides a clear closing memory image
+        # without reusing the insight page's two-way loop.
+        horizon_y = 592
+        draw.line((228, horizon_y, 1372, horizon_y), fill=(*highlight, 74), width=4)
+        for index in range(6):
+            left = 238 + index * 112
+            right = 1362 - index * 112
+            top = 170 + index * 52
+            color = accent if index % 2 == 0 else support
+            draw.rounded_rectangle(
+                (left, top, left + 112, horizon_y),
+                radius=42,
+                fill=(*color, 48 + index * 15),
+                outline=(*highlight, 38 + index * 8),
+                width=2,
+            )
+            draw.rounded_rectangle(
+                (right - 112, top, right, horizon_y),
+                radius=42,
+                fill=(*color, 48 + index * 15),
+                outline=(*highlight, 38 + index * 8),
+                width=2,
+            )
+        path = [(662, 760), (938, 760), (872, 388), (728, 388)]
+        shadow_draw.polygon([(x + 12, y + 16) for x, y in path], fill=(0, 0, 0, 96))
+        draw.polygon(path, fill=(*blend(accent, support, 0.45), 156), outline=(*highlight, 74))
+        draw.ellipse((724, 260, 876, 412), fill=(*highlight, 86))
+        draw.ellipse((758, 294, 842, 378), fill=(*accent, 214))
+    elif image_type in {"background", "course_review_atmosphere", "business_scene"}:
         # Academic studio: an open research book, learning tiers and abstract
         # people make the scene recognisably educational without fabricating
         # a screen, a document, pseudo-type or a cartoon robot.
@@ -2871,7 +3081,16 @@ def _image_search_queries(query: str, image_type: str) -> list[str]:
     )
     subject_queries = _subject_image_queries(cleaned_query, image_type)
     cross_language_queries = _cross_language_image_queries(cleaned_query, image_type)
+    # Preserve concise, concrete catalogue queries. Generic type defaults such
+    # as business strategy meeting must not erase a control-room or lab scene.
+    direct_query = (
+        not _contains_cjk(cleaned_query)
+        and 2 <= len(cleaned_query.split()) <= 8
+        and not _is_enterprise_ai_content(cleaned_query)
+        and not _is_ai_education_content(cleaned_query)
+    )
     candidates = [
+        *([cleaned_query] if direct_query else []),
         # For CJK source text, the short, scene-specific English query has a
         # much deeper licensed-image inventory than a whole sentence copied
         # from the outline. Try it before the topic-only fallback.
@@ -3554,24 +3773,32 @@ def _fit_foreground_box(
 
 def _visible_text_font_size(text: str, cx: int, cy: int, requested_size: int, role: str) -> int:
     weighted = _display_weight(text)
+    if role == "meta":
+        return max(850, min(1400, requested_size))
     size = requested_size
     if role == "title":
         if weighted >= 58:
-            size = min(size, 2450)
+            size = min(size, 3300)
         elif weighted >= 46:
-            size = min(size, 2650)
+            size = min(size, 3400)
         elif weighted >= 34:
-            size = min(size, 2850)
+            size = min(size, 3500)
     elif role == "subtitle":
         if weighted >= 72:
-            size = min(size, 1350)
+            size = min(size, 1600)
         elif weighted >= 52:
-            size = min(size, 1500)
+            size = min(size, 1650)
     elif weighted >= 110 or (cx <= 2600000 and weighted >= 72):
-        size = min(size, 1180)
+        size = min(size, 1600)
     elif weighted >= 86 or cy <= 420000:
-        size = min(size, 1320)
-    return max(1050, size)
+        size = min(size, 1650)
+    minimum = {
+        "title": PPT_PAGE_TITLE_MIN,
+        "subtitle": 1500,
+        "card": PPT_CARD_MIN,
+        "body": 1600,
+    }.get(role, 1500)
+    return max(minimum, size)
 
 
 def _ceil_div(value: int, divisor: int) -> int:
@@ -3579,6 +3806,8 @@ def _ceil_div(value: int, divisor: int) -> int:
 
 
 def _text_insets_for_role(role: str, cx: int, cy: int) -> tuple[int, int]:
+    if role == "meta":
+        return (50000, 30000)
     if role == "title":
         return (120000 if cx <= 5200000 else 160000, 105000)
     if role == "card":
@@ -3619,13 +3848,15 @@ def _required_text_cy(text: str, cx: int, font_size: int, role: str, inset_x: in
 
 
 def _minimum_font_size(role: str) -> int:
+    if role == "meta":
+        return 850
     if role == "title":
         return PPT_PAGE_TITLE_MIN
     if role == "subtitle":
-        return 1300
+        return 1500
     if role == "card":
         return PPT_CARD_MIN
-    return 1000
+    return 1600
 
 
 def _fit_visible_text_to_frame(text: str, cx: int, cy: int, font_size: int, role: str) -> tuple[str, int]:
@@ -4900,6 +5131,7 @@ def _page_number_shape(slide, total_slides: int, accent: str) -> str:
         1150,
         accent,
         align="r",
+        role="meta",
     )
 
 
@@ -5034,35 +5266,16 @@ def _slide_visual_palette(palette: list[str], slide) -> tuple[str, str, str, str
         "future_horizon",
         "closing_echo",
     }
-    # The direction owns the design grammar; the page job owns its local face.
-    # A restrained accent rotation prevents a deck from reading as eight copies
-    # of one lavender card while preserving enough family resemblance for a
-    # client delivery.  All swatches are deliberately dark enough to remain
-    # legible on the paper faces below.
-    archetype_accents = {
-        "cinematic_hero": "B98643",
-        "editorial_cover": "8F4E6B",
-        "chapter_index": "18747A",
-        "editorial_split": "8A5A22",
-        "statement_focus": "6E549E",
-        "proof_mosaic": "AD563F",
-        "data_landscape": "2A6491",
-        "process_ribbon": "1F795F",
-        "system_map": "465EAA",
-        "split_comparison": "AA4D68",
-        "priority_stack": "326D62",
-        "gallery_strip": "92662B",
-        "vertical_story": "415C93",
-        "spotlight_quote": "8E4A70",
-        "evidence_matrix": "A15538",
-        "step_ladder": "246F75",
-        "bridge_narrative": "5F629B",
-        "closing_bloom": "B98643",
-        "manifesto_close": "7E5A9D",
-        "future_horizon": "33756F",
-        "closing_echo": "95602D",
-    }
-    page_accent = archetype_accents.get(archetype, theme_accent)
+    # A Fortune-500-style deck should look like one brand, not a gallery of
+    # unrelated theme colors. Composition creates page variety; the accent
+    # remains anchored to the selected direction and shifts only slightly for
+    # evidence/comparison semantics.
+    if archetype in {"proof_mosaic", "data_landscape", "evidence_matrix"}:
+        page_accent = _mix_ppt_colors(theme_accent, contrast_b, 0.12)
+    elif archetype == "split_comparison":
+        page_accent = _mix_ppt_colors(theme_accent, contrast_a, 0.14)
+    else:
+        page_accent = theme_accent
     if dark_anchor:
         bg = theme_bg if not _is_light_color(theme_bg) else _mix_ppt_colors(theme_bg, "05080D", 0.86)
         fg = theme_fg if _is_light_color(theme_fg) else "FAF8F2"
@@ -5106,6 +5319,7 @@ def _cinematic_backdrop_shapes(
             visual_asset.alt,
             rounded=False,
             name=f"Content Visual {placement.gravity}",
+            source_dimensions=(visual_asset.width, visual_asset.height),
         )
         if visual_asset is not None and placement.mode == "full_bleed"
         else ""
@@ -5177,6 +5391,8 @@ def _page_backdrop_ornaments(slide, accent: str, soft: str, red: str, blue: str)
         return _alpha_rect_shape(204, 11120000, 720000, 36000, 4850000, accent, 48000, name="Vertical Rhythm")
     if archetype in {"system_map", "statement_focus", "orbit_system"}:
         return ""
+    if archetype in {"editorial_split", "architectural_cover"}:
+        return ""
     if archetype in {"proof_mosaic", "data_landscape", "split_comparison", "evidence_matrix"}:
         return _alpha_rect_shape(204, 720000, 5720000, 3600000, 28000, accent, 44000, name="Evidence Baseline")
     if archetype in {"process_ribbon", "diagonal_story", "bridge_narrative", "gallery_strip"}:
@@ -5214,6 +5430,7 @@ def _treatment_pic_shape(slide, visual_asset: VisualAsset | None) -> str:
         visual_asset.alt,
         rounded=placement.rounded,
         name=f"Page Visual {image_treatment} {placement.gravity}",
+        source_dimensions=(visual_asset.width, visual_asset.height),
     )
 
 
@@ -5301,7 +5518,7 @@ def _ppt_title_text(value: str) -> str:
         return ""
     text = _trim_dangling_visible_text(text)
     is_cjk = _contains_cjk(text)
-    title_limit = 30 if is_cjk else 62
+    title_limit = 26 if is_cjk else 54
     if len(text) <= title_limit:
         return text
     for separator in ("：", ":", "—", "｜", "|"):
@@ -5949,11 +6166,11 @@ def _editorial_split_layout(slide, blocks: list, fg: str, accent: str, soft: str
     support = blocks[1:4] or blocks[:1]
     support_shapes: list[str] = []
     for index, block in enumerate(support[:2]):
-        y = 4000000 + index * 940000
+        y = 4000000 + index * 1450000
         support_shapes.extend(
             [
                 _text_shape(136 + index * 2, f"0{index + 1}", 6460000, y, 520000, 360000, 1450, accent, bold=True),
-                _text_shape(137 + index * 2, block.content, 7120000, y - 20000, 4240000, 620000, 1450, fg),
+                _text_shape(137 + index * 2, block.content, 7040000, y - 20000, 4320000, 700000, 1600, fg),
             ]
         )
     return "\n".join(
@@ -5961,8 +6178,8 @@ def _editorial_split_layout(slide, blocks: list, fg: str, accent: str, soft: str
             _rect_shape(130, 6460000, 680000, 760000, 42000, accent),
             _text_shape(131, _ppt_title_text(slide.title), 6460000, 970000, 4900000, 1300000, _ppt_title_font_size(_ppt_title_text(slide.title)), fg, bold=True),
             (_text_shape(132, slide.subtitle, 6480000, 2350000, 4850000, 420000, 1500, accent, bold=True) if slide.subtitle else ""),
-            _text_shape(133, lead, 6480000, 2740000, 4850000, 820000, 1750, fg, bold=True),
-            _rect_shape(134, 6480000, 3740000, 4880000, 26000, accent),
+            _text_shape(133, lead, 6480000, 2420000, 4850000, 820000, 1650, fg, bold=True),
+            _rect_shape(134, 6480000, 3800000, 4880000, 26000, accent),
             *support_shapes,
         ]
     )
@@ -5970,12 +6187,20 @@ def _editorial_split_layout(slide, blocks: list, fg: str, accent: str, soft: str
 
 def _architectural_cover_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
     lead = blocks[0].content if blocks else slide.visual_intent
+    title = _ppt_title_text(slide.title)
+    subtitle = _clean_visible_text(slide.subtitle or lead, role="subtitle", clip=False)
+    title_size = _visible_text_font_size(title, 7200000, 1420000, _ppt_title_font_size(title, cover=True), "title")
+    subtitle_size = _visible_text_font_size(subtitle, 6700000, 460000, 1500, "subtitle")
+    title_cy = _fit_text_frame(title, 1550000, 1000000, 7200000, 1420000, title_size, "title")[4]
+    subtitle_cy = _fit_text_frame(subtitle, 1580000, 1000000, 6700000, 460000, subtitle_size, "subtitle")[4]
+    gap = 180000
+    title_y = min(3340000, SLIDE_CY - FOREGROUND_SAFE_BOTTOM - title_cy - gap - subtitle_cy)
+    subtitle_y = title_y + title_cy + gap
     return "\n".join(
         [
-            _shape(125, "rect", 620000, 620000, 11000000, 5000000, soft, alpha=9000, line=accent),
             _rect_shape(126, 1160000, 1120000, 64000, 4050000, accent),
-            _text_shape(127, _ppt_title_text(slide.title), 1550000, 3340000, 7200000, 1420000, _ppt_title_font_size(_ppt_title_text(slide.title), cover=True), fg, bold=True),
-            _text_shape(128, slide.subtitle or lead, 1580000, 4900000, 6700000, 460000, 1500, accent, bold=True),
+            _text_shape(127, title, 1550000, title_y, 7200000, title_cy, title_size, fg, bold=True),
+            _text_shape(128, subtitle, 1580000, subtitle_y, 6700000, subtitle_cy, subtitle_size, accent, bold=True),
             _shape(129, "ellipse", 9100000, 1050000, 1700000, 1700000, accent, alpha=36000),
         ]
     )
@@ -5984,18 +6209,27 @@ def _architectural_cover_layout(slide, blocks: list, fg: str, accent: str, soft:
 def _chapter_index_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
     items = blocks[:4] or blocks[:1]
     rows = []
+    cursor_y = 2300000
     for index, block in enumerate(items):
-        y = 2200000 + index * 980000
+        cleaned = _clean_visible_text(block.content, role="body", clip=False)
+        font_size = _visible_text_font_size(cleaned, 4020000, 760000, 1700, "body")
+        inset_x, inset_y = _text_insets_for_role("body", 4020000, 760000)
+        row_cy = max(
+            760000,
+            int(_required_text_cy(cleaned, 4020000, font_size, "body", inset_x, inset_y) / 0.88),
+        )
+        y = cursor_y
         rows.extend(
             [
                 _text_shape(132 + index * 3, f"{index + 1:02d}", 940000, y, 620000, 420000, 1750, accent, bold=True),
                 _rect_shape(133 + index * 3, 1640000, y + 210000, 720000, 20000, accent),
-                _text_shape(134 + index * 3, block.content, 2580000, y - 20000, 3650000, 560000, 1700, fg),
+                _text_shape(134 + index * 3, block.content, 2380000, y - 20000, 4020000, row_cy, 1700, fg, role="body"),
             ]
         )
+        cursor_y += row_cy + 30000
     return "\n".join(
         [
-            _alpha_rect_shape(128, 520000, 420000, 6340000, 5720000, "FFFFFF", 86000, name="Agenda Reading Panel"),
+            _alpha_rect_shape(128, 520000, 420000, 6340000, 6000000, "FFFFFF", 86000, name="Agenda Reading Panel"),
             _text_shape(129, _ppt_title_text(slide.title), 900000, 680000, 5440000, 900000, _ppt_title_font_size(_ppt_title_text(slide.title)), fg, bold=True),
             (_text_shape(130, slide.subtitle, 930000, 1580000, 5200000, 330000, 1450, accent, bold=True) if slide.subtitle else ""),
             *rows,
@@ -6010,7 +6244,7 @@ def _diagonal_story_layout(slide, blocks: list, fg: str, accent: str, soft: str)
         [
             _shape(145, "parallelogram", 0, 0, 6400000, SLIDE_CY, soft, alpha=33000),
             _text_shape(146, slide.title, 700000, 520000, 6000000, 1040000, 3100, fg, bold=True),
-            _text_shape(147, lead, 920000, 2150000, 4650000, 1350000, 2250, fg, bold=True),
+            _text_shape(147, lead, 920000, 2150000, 4650000, 1600000, 2250, fg, bold=True),
             *[
                 _card_shape(148 + index, block.content, 7100000, 1350000 + index * 1120000, 4050000, 820000, soft, fg, accent)
                 for index, block in enumerate(cards)
@@ -6047,9 +6281,9 @@ def _proof_mosaic_layout(slide, blocks: list, fg: str, accent: str, soft: str) -
     cards = blocks[:4] or blocks[:1]
     shapes: list[str] = []
     if cards:
-        shapes.append(_text_shape(160, cards[0].content, 760000, 1860000, 5500000, 1060000, 1850, fg, bold=True))
+        shapes.append(_text_shape(160, cards[0].content, 760000, 1860000, 5500000, 1450000, 1850, fg, bold=True))
     for index, block in enumerate(cards[1:3]):
-        y = 3480000 + index * 1040000
+        y = 3480000 + index * 1350000
         shapes.extend(
             [
                 _rect_shape(161 + index * 2, 760000, y + 160000, 540000, 26000, accent),
@@ -6104,15 +6338,31 @@ def _priority_stack_layout(slide, blocks: list, fg: str, accent: str, soft: str)
     items = blocks[:4] or blocks[:1]
     cards: list[str] = []
     for index, block in enumerate(items):
-        y = 1840000 + index * 1050000
+        y = 2000000 + index * 1120000
         cards.extend(
             [
                 _text_shape(180 + index * 3, f"0{index + 1}", 820000, y, 600000, 420000, 1700, accent, bold=True),
                 _rect_shape(181 + index * 3, 1540000, y + 220000, 720000, 24000, accent),
-                _text_shape(182 + index * 3, block.content, 2460000, y - 40000, 6200000, 640000, 1450, fg),
+                _text_shape(182 + index * 3, block.content, 2460000, y - 40000, 6200000, 760000, 1600, fg),
             ]
         )
-    return "\n".join([_title_and_subtitle(slide, fg, title_y=390000, title_size=2900), *cards])
+    title = _text_shape(
+        5,
+        _ppt_title_text(slide.title),
+        700000,
+        390000,
+        8200000,
+        920000,
+        _ppt_title_font_size(_ppt_title_text(slide.title)),
+        fg,
+        bold=True,
+    )
+    subtitle = (
+        _text_shape(7, slide.subtitle, 720000, 1250000, 7900000, 360000, 1500, fg)
+        if slide.subtitle
+        else ""
+    )
+    return "\n".join([title, subtitle, *cards])
 
 
 def _gallery_strip_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
@@ -6373,22 +6623,41 @@ def _three_cards_layout(slide, blocks: list, fg: str, accent: str, soft: str) ->
 
 def _timeline_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
     events = blocks[:4] or blocks[:1]
-    event_cy = _uniform_card_height(
-        [(block.content, 2200000) for block in events],
-        base_cy=1650000,
-    )
-    line = _rect_shape(70, 1080000, 3350000, 9800000, 35000, accent)
+    row_heights = [
+        _uniform_card_height(
+            [(block.content, 4800000) for block in events[row_start : row_start + 2]],
+            base_cy=960000,
+        )
+        for row_start in range(0, len(events), 2)
+    ]
+    row_ys = [3280000]
+    if len(row_heights) > 1:
+        row_ys.append(row_ys[0] + row_heights[0] + 180000)
+    rails = [
+        _rect_shape(70, 980000, row_ys[0] + 220000, 10300000, 30000, accent),
+        *(
+            [
+                _rect_shape(83, 980000, row_ys[1] + 220000, 10300000, 30000, accent),
+                _rect_shape(84, 6260000, row_ys[0] + 220000, 30000, row_ys[1] - row_ys[0], accent),
+            ]
+            if len(row_ys) > 1
+            else []
+        ),
+    ]
     nodes = []
     for index, block in enumerate(events):
-        x = 1080000 + index * 3100000
+        column = index % 2
+        row = index // 2
+        x = 760000 + column * 5750000
+        y = row_ys[row]
         nodes.extend(
             [
-                _shape(71 + index * 3, "ellipse", x - 90000, 3260000, 220000, 220000, accent),
-                _text_shape(72 + index * 3, f"{index + 1}", x - 62000, 3295000, 160000, 100000, 900, "111111", bold=True, align="ctr"),
-                _card_shape(73 + index * 3, block.content, x - 360000, 3720000, 2200000, event_cy, soft, fg, accent),
+                _shape(71 + index * 3, "ellipse", x, y + 90000, 260000, 260000, accent),
+                _text_shape(72 + index * 3, f"{index + 1}", x + 50000, y + 142000, 160000, 110000, 900, "111111", bold=True, align="ctr", role="meta"),
+                _card_shape(73 + index * 3, block.content, x + 420000, y, 4800000, row_heights[row], soft, fg, accent),
             ]
         )
-    return "\n".join([_title_and_subtitle(slide, fg, title_y=430000, title_size=3000), line, *nodes])
+    return "\n".join([_title_and_subtitle(slide, fg, title_y=430000, title_size=3000), *rails, *nodes])
 
 
 def _chart_focus_layout(slide, blocks: list, fg: str, accent: str, soft: str) -> str:
@@ -6439,7 +6708,13 @@ def _text_shape(
     role: str | None = None,
 ) -> str:
     inferred_role = role or (
-        "title" if bold and size >= 2400 else "subtitle" if bold or size >= 1700 else "body"
+        "meta"
+        if shape_id >= 900
+        else "title"
+        if bold and size >= 2400
+        else "subtitle"
+        if bold or size >= 1700
+        else "body"
     )
     cleaned_text = _clean_visible_text(text, role=inferred_role, clip=False)
     font_size = _visible_text_font_size(cleaned_text, cx, cy, size, inferred_role)
@@ -6508,8 +6783,10 @@ def _shape(
     )
     effect_xml = (
         '<a:effectLst><a:outerShdw blurRad="63500" dist="25400" dir="5400000" rotWithShape="0">'
-        '<a:srgbClr val="000000"><a:alpha val="18000"/></a:srgbClr>'
+        '<a:srgbClr val="000000"><a:alpha val="9000"/></a:srgbClr>'
         "</a:outerShdw></a:effectLst>"
+        if preset in {"roundRect", "ellipse"}
+        else ""
     )
     return f'''<p:sp>
   <p:nvSpPr><p:cNvPr id="{shape_id}" name="Design Shape {shape_id}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
@@ -6528,18 +6805,34 @@ def _image_pic_shape(
     *,
     rounded: bool = True,
     name: str = "Visual Asset",
+    source_dimensions: tuple[int | None, int | None] | None = None,
 ) -> str:
     safe_description = html.escape(_clean_visible_text(description, role="body"))
     safe_name = html.escape(_clean_visible_text(name, role="body") or "Visual Asset")
     preset = "roundRect" if rounded else "rect"
+    crop_xml = ""
+    if source_dimensions is not None:
+        source_width = int(source_dimensions[0] or 0)
+        source_height = int(source_dimensions[1] or 0)
+        if source_width > 0 and source_height > 0 and cx > 0 and cy > 0:
+            source_ratio = source_width / source_height
+            frame_ratio = cx / cy
+            if source_ratio > frame_ratio:
+                visible_width = source_height * frame_ratio
+                crop = max(0, min(49999, round((source_width - visible_width) / source_width * 50000)))
+                crop_xml = f'<a:srcRect l="{crop}" r="{crop}"/>'
+            elif source_ratio < frame_ratio:
+                visible_height = source_width / frame_ratio
+                crop = max(0, min(49999, round((source_height - visible_height) / source_height * 50000)))
+                crop_xml = f'<a:srcRect t="{crop}" b="{crop}"/>'
     chrome_xml = (
-        '<a:ln w="9000"><a:solidFill><a:srgbClr val="FFFFFF"><a:alpha val="36000"/></a:srgbClr></a:solidFill></a:ln><a:effectLst><a:outerShdw blurRad="76200" dist="25400" dir="5400000" rotWithShape="0"><a:srgbClr val="000000"><a:alpha val="26000"/></a:srgbClr></a:outerShdw></a:effectLst>'
+        '<a:ln w="9000"><a:solidFill><a:srgbClr val="FFFFFF"><a:alpha val="30000"/></a:srgbClr></a:solidFill></a:ln><a:effectLst><a:outerShdw blurRad="76200" dist="25400" dir="5400000" rotWithShape="0"><a:srgbClr val="000000"><a:alpha val="15000"/></a:srgbClr></a:outerShdw></a:effectLst>'
         if rounded
         else "<a:ln><a:noFill/></a:ln>"
     )
     return f'''<p:pic>
   <p:nvPicPr><p:cNvPr id="{shape_id}" name="{safe_name} {shape_id}" descr="{safe_description}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>
-  <p:blipFill><a:blip r:embed="{rel_id}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>
+  <p:blipFill><a:blip r:embed="{rel_id}"/>{crop_xml}<a:stretch><a:fillRect/></a:stretch></p:blipFill>
   <p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="{preset}"><a:avLst/></a:prstGeom>{chrome_xml}</p:spPr>
 </p:pic>'''
 
@@ -6593,7 +6886,7 @@ def _card_shape(
     inset_x, inset_y = _text_insets_for_role("card", cx, cy)
     effect_xml = (
         '<a:effectLst><a:outerShdw blurRad="76200" dist="38100" dir="5400000" rotWithShape="0">'
-        '<a:srgbClr val="000000"><a:alpha val="22000"/></a:srgbClr>'
+        '<a:srgbClr val="000000"><a:alpha val="11000"/></a:srgbClr>'
         "</a:outerShdw></a:effectLst>"
     )
     return f'''<p:sp>
@@ -6618,9 +6911,9 @@ def _card_font_size(content: str, cx: int, cy: int) -> int:
     else:
         size = PPT_CARD_MAX
     if narrow:
-        size = min(size, 1550)
+        size = max(PPT_CARD_MIN, min(size, 1650))
     if compact:
-        size = min(size, 1550)
+        size = max(PPT_CARD_MIN, min(size, 1650))
     return size
 
 

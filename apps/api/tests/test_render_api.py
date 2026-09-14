@@ -322,6 +322,63 @@ def test_ai_higher_education_search_queries_follow_the_slide_story_beat() -> Non
     assert "artificial intelligence research" not in queries
 
 
+def test_enterprise_ai_framework_prompt_depicts_the_value_chain_instead_of_abstract_still_life() -> None:
+    prompt = render_service._ai_image_generation_prompt(
+        slide_index=4,
+        query="enterprise AI ROI chain workflow orchestration",
+        image_type="data_visual",
+        purpose="Explain the operating mechanism from use to process to outcome to value.",
+        image_prompt="premium four-stage decision diagram with no labels",
+        slide_title="The ROI chain connects use to measurable value",
+        slide_intent="Show four connected process stages and accountable human handoffs.",
+        asset_role="diagram",
+        image_treatment="masked_window",
+        composition_archetype="system_map",
+        direction_name="Executive Signal",
+        palette=["#101820", "#F3F0E8", "#C89B55"],
+    )
+    lowered = prompt.casefold()
+
+    assert prompt.startswith("Concrete semantic subject:")
+    assert "four linked physical workstations" in lowered
+    assert "human request" in lowered
+    assert "generic glassware" in lowered  # Explicitly prohibited, never requested.
+    assert "abstract still life" not in lowered
+    assert "absolutely no visible text" in lowered
+
+
+def test_enterprise_ai_story_beats_produce_distinct_concrete_scene_directions() -> None:
+    cases = {
+        "pilot success is not scale evidence for enterprise AI operations": "isolated prototype",
+        "enterprise AI evidence matrix: baseline attribution and risk boundary": "three physically distinct blank evidence stations",
+        "scale only after value, adoption, and risk gates for enterprise AI": "three parallel controlled lanes",
+        "run AI agents as an operating system with human control in the enterprise": "pause, reroute, and recover",
+    }
+
+    prompts = []
+    for index, (title, expected) in enumerate(cases.items(), start=2):
+        prompt = render_service._ai_image_generation_prompt(
+            slide_index=index,
+            query=title,
+            image_type="icon_illustration",
+            purpose="Make this executive decision visible.",
+            image_prompt="boardroom-grade conceptual scene",
+            slide_title=title,
+            slide_intent=title,
+            asset_role="diagram",
+            image_treatment="cinematic_crop",
+            composition_archetype="editorial_split",
+            direction_name="Executive Signal",
+            palette=["#101820", "#F3F0E8", "#C89B55"],
+        )
+        assert expected in prompt.casefold()
+        assert "abstract still life" not in prompt.casefold()
+        assert "absolutely no visible text" in prompt.casefold()
+        prompts.append(prompt)
+
+    assert len(set(prompts)) == len(prompts)
+
+
 def test_commons_ranking_prefers_people_over_an_empty_classroom() -> None:
     shared_info = {"width": 3456, "height": 2304, "size": 2_000_000, "mime": "image/jpeg"}
     human_score = render_service._commons_candidate_score(
@@ -474,6 +531,23 @@ def test_visual_asset_bakes_exif_orientation_before_powerpoint_embedding(tmp_pat
     assert render_service.raster_dimensions(normalized.path) == (120, 80)
     with Image.open(normalized.path) as output:
         assert output.getexif().get(274) is None
+
+
+def test_pptx_picture_frame_uses_aspect_fill_crop_instead_of_stretching() -> None:
+    xml = render_service._image_pic_shape(
+        12,
+        "rId3",
+        0,
+        0,
+        1800000,
+        4200000,
+        "Boardroom visual",
+        source_dimensions=(1920, 1080),
+    )
+
+    assert '<a:srcRect l="' in xml
+    assert ' r="' in xml
+    assert '<a:stretch><a:fillRect/></a:stretch>' in xml
 
 
 def create_renderable_deck(client) -> dict:
@@ -921,6 +995,72 @@ def test_render_creates_pptx_and_hyperframes_from_same_slide_deck(client) -> Non
     assert "outerShdw" in slide5
 
 
+def test_commons_search_skips_used_photo_and_downloads_next_candidate(tmp_path, monkeypatch) -> None:
+    import hashlib
+
+    pages = {
+        str(index): {"title": f"File:Business workshop {index}.jpg", "imageinfo": [{
+            "url": f"https://images.example/{index}.jpg", "mime": "image/jpeg",
+            "width": 1920, "height": 1080, "size": 9000,
+        }]}
+        for index in (1, 2)
+    }
+    monkeypatch.setattr(render_service, "_read_json_url", lambda *_args, **_kwargs: {"query": {"pages": pages}})
+    monkeypatch.setattr(render_service, "_image_has_excessive_visible_text", lambda _path: False)
+    downloads = []
+
+    def download(url, path, **_kwargs):
+        downloads.append(url)
+        path.write_bytes(b"used" if url.endswith("1.jpg") else b"fresh")
+        return "image/jpeg"
+
+    monkeypatch.setattr(render_service, "_download_binary", download)
+    asset = render_service._search_commons_visual_asset(
+        1, "business workshop", tmp_path, image_type="business_scene",
+        purpose="Workshop", prompt="Workshop", provider_chain=["open_web_search"],
+        timeout_seconds=1, excluded_hashes={hashlib.sha256(b"used").hexdigest()},
+    )
+    assert asset is not None
+    assert asset.path.read_bytes() == b"fresh"
+    assert len(downloads) == 2
+
+
+def test_concrete_business_photo_query_is_not_replaced_by_generic_meeting() -> None:
+    for query in ("industrial control room operator", "quality control measurement", "project planning workshop"):
+        assert render_service._image_search_queries(query, "business_scene")[0] == query
+
+
+def test_commons_uses_scene_description_and_recovers_from_broken_first_download(tmp_path, monkeypatch) -> None:
+    pages = {
+        str(index): {"title": f"File:IMG_00{index}.jpg", "imageinfo": [{
+            "url": f"https://images.example/{index}.jpg", "mime": "image/jpeg",
+            "width": 1920, "height": 1080, "size": 9000,
+            "extmetadata": {"ImageDescription": {"value": "<p>Operators supervise an industrial control room.</p>"}},
+        }]}
+        for index in (1, 2)
+    }
+    monkeypatch.setattr(render_service, "_read_json_url", lambda *_args, **_kwargs: {"query": {"pages": pages}})
+    monkeypatch.setattr(render_service, "_image_has_excessive_visible_text", lambda _path: False)
+    attempted = []
+
+    def download(url, path, **_kwargs):
+        attempted.append(url)
+        if url.endswith("1.jpg"):
+            raise TimeoutError("Image host timed out")
+        path.write_bytes(b"valid-second-photo")
+        return "image/jpeg"
+
+    monkeypatch.setattr(render_service, "_download_binary", download)
+    asset = render_service._search_commons_visual_asset(
+        1, "industrial control room operator", tmp_path, image_type="business_scene",
+        purpose="Human oversight", prompt="Human oversight", provider_chain=["open_web_search"],
+        timeout_seconds=1,
+    )
+    assert asset is not None
+    assert asset.path.read_bytes() == b"valid-second-photo"
+    assert len(attempted) == 2
+
+
 def test_open_visual_search_uses_wikipedia_page_images_without_bing_key(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("AI_PPT_BING_IMAGE_SEARCH_KEY", raising=False)
     requested_urls: list[str] = []
@@ -1282,6 +1422,17 @@ def test_visible_text_scan_rejects_large_web_asset(monkeypatch, tmp_path) -> Non
         ),
     )
 
+    assert render_service._image_has_excessive_visible_text(image_path) is True
+
+
+def test_visible_text_scan_rejects_short_provider_watermark(monkeypatch, tmp_path) -> None:
+    image_path = tmp_path / "watermarked.jpg"
+    image_path.write_bytes(b"0" * (9 * 1024))
+    monkeypatch.setattr(render_service.shutil, "which", lambda _name: "tesseract")
+    monkeypatch.setattr(
+        render_service.subprocess, "run",
+        lambda *_args, **_kwargs: SimpleNamespace(stdout="pollinations.ai"),
+    )
     assert render_service._image_has_excessive_visible_text(image_path) is True
 
 

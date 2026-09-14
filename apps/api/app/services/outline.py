@@ -958,7 +958,7 @@ def _is_zh(brief: ProjectBrief) -> bool:
     return brief.output_language == "zh"
 
 
-def _source_profile(source_pack: SourcePack | None) -> _SourceProfile | None:
+def _source_profile_legacy(source_pack: SourcePack | None) -> _SourceProfile | None:
     if source_pack is None or not source_pack.sources:
         return None
     summaries = [item.summary.strip() for item in source_pack.sources if item.summary.strip()]
@@ -1062,6 +1062,141 @@ def _source_profile(source_pack: SourcePack | None) -> _SourceProfile | None:
         ppt_flow=[_clip_text(item, 220) for item in ppt_flow[:8]],
         excerpts=[_clip_text(item, 220) for item in excerpts[:5]],
         source_ids=source_ids[:6],
+        case_sections=case_sections,
+        logic_chain=logic_chain_values,
+    )
+
+
+def _source_profile(source_pack: SourcePack | None) -> _SourceProfile | None:
+    """Build a source profile without assuming the extractor used Chinese labels.
+
+    Older extraction reports use Chinese section headings and remain supported by
+    the legacy parser. Uploaded English notes, lightweight adapters, and external
+    providers often return equally valid ASCII headings. Parse those explicitly
+    so the outline follows the source argument instead of repeating its first
+    label as the thesis on every page.
+    """
+
+    legacy = _source_profile_legacy(source_pack)
+    if source_pack is None or not source_pack.sources:
+        return legacy
+    summaries = [item.summary.strip() for item in source_pack.sources if item.summary.strip()]
+    if not summaries:
+        return legacy
+    combined = "\n".join(summaries)
+    if re.search(r"[\u3400-\u9fff]", combined):
+        return legacy
+
+    first_summary = summaries[0]
+    case_sections = _source_case_sections(combined)
+    logic_chain_values: dict[str, str] = {}
+    key_points: list[str] = []
+    scholarly_evidence: list[str] = []
+    general_evidence: list[str] = []
+    evidence_matrix: list[str] = []
+    ppt_flow: list[str] = []
+    excerpts: list[str] = []
+
+    title = (
+        _section_value(first_summary, "Core theme")
+        or _section_value(first_summary, "Title")
+        or next((item.title for item in source_pack.sources if item.title), None)
+        or _first_sentence(first_summary)
+    )
+    raw_thesis = (
+        _section_value(first_summary, "Article thesis")
+        or _section_value(first_summary, "Thesis")
+        or case_sections.get("conclusion")
+        or case_sections.get("insight")
+        or case_sections.get("central_question")
+        or _first_sentence(first_summary)
+    )
+    thesis = _first_sentence(raw_thesis)
+
+    for source in source_pack.sources:
+        summary = source.summary.strip()
+        if not summary:
+            continue
+        source_thesis = (
+            _section_value(summary, "Article thesis")
+            or _section_value(summary, "Thesis")
+        )
+        key_points.extend(_ascii_section_items(summary, "Key arguments"))
+        key_points.extend(_ascii_section_items(summary, "Key points"))
+        if source_thesis and _first_sentence(source_thesis) != thesis:
+            key_points.append(_first_sentence(source_thesis))
+
+        logic_chain = _logic_chain_profile(summary)
+        key_points.extend(logic_chain["points"])
+        for logic_key in ("central", "why", "mechanism", "risk", "action"):
+            value = str(logic_chain.get(logic_key, "")).strip()
+            if value and logic_key not in logic_chain_values:
+                logic_chain_values[logic_key] = value
+
+        source_evidence = [
+            *_ascii_section_items(summary, "Evidence"),
+            *_ascii_section_items(summary, "Facts and data"),
+            *logic_chain["evidence"],
+        ]
+        source_matrix = [
+            *_ascii_section_items(summary, "Evidence matrix"),
+            *_ascii_section_items(summary, "Evidence map"),
+        ]
+        evidence_matrix.extend(source_matrix)
+        scholarly = (
+            "openalex" in source.source_id.lower()
+            or "crossref" in source.source_id.lower()
+            or bool(source.url and "doi.org" in source.url.lower())
+        )
+        (scholarly_evidence if scholarly else general_evidence).extend(source_evidence)
+        ppt_flow.extend(_ascii_section_items(summary, "Recommended PPT flow"))
+        ppt_flow.extend(_ascii_section_items(summary, "PPT outline suggestions"))
+        ppt_flow.extend(logic_chain["flow"])
+        excerpts.extend(_ascii_section_items(summary, "Excerpts"))
+
+    key_points = _unique_source_items(key_points)
+    if not key_points:
+        key_points = _unique_source_items(
+            [
+                point
+                for summary in summaries
+                for point in _summary_sentence_points(summary)
+            ]
+        )
+    evidence_matrix = _unique_source_items(evidence_matrix)
+    evidence = _unique_source_items(
+        [*evidence_matrix, *scholarly_evidence, *general_evidence]
+    )
+    if not evidence:
+        evidence = [
+            "Evidence boundary: the provided source defines the strategic claim but supplies no measured outcome data; validate it through a controlled pilot before scale."
+        ]
+
+    if "action" not in logic_chain_values:
+        action_pattern = re.compile(
+            r"\b(?:should|must|pilot|scale|implement|adopt|review|decide|measure|assign)\b",
+            re.IGNORECASE,
+        )
+        action = next((item for item in key_points if action_pattern.search(item)), "")
+        if action:
+            logic_chain_values["action"] = action
+
+    ppt_flow = _unique_source_items(ppt_flow)
+    if not ppt_flow:
+        ppt_flow = _unique_source_items(
+            [thesis, *key_points[:5], logic_chain_values.get("action", "")]
+        )
+    excerpts = _unique_source_items(excerpts)
+
+    return _SourceProfile(
+        title=_clip_text(str(title), 120),
+        thesis=_clip_text(thesis, 220),
+        key_points=[_clip_text(item, 220) for item in key_points[:8]],
+        evidence=[_clip_text(item, 220) for item in evidence[:6]],
+        evidence_matrix=[_clip_text(item, 300) for item in evidence_matrix[:6]],
+        ppt_flow=[_clip_text(item, 220) for item in ppt_flow[:8]],
+        excerpts=[_clip_text(item, 220) for item in excerpts[:5]],
+        source_ids=[item.source_id for item in source_pack.sources[:6]],
         case_sections=case_sections,
         logic_chain=logic_chain_values,
     )
@@ -2290,9 +2425,14 @@ def _source_slide_title(
             "conclusion": "Scale only when learning and integrity improve",
         }
     else:
+        agenda_anchor = _pick(
+            source_profile.ppt_flow,
+            0,
+            source_profile.logic_chain.get("central", "decision path"),
+        )
         mapping = {
             "cover": topic_label,
-            "agenda": "From question to action",
+            "agenda": f"Decision path: {_source_title_fragment(agenda_anchor, 'from question to action', 42)}",
             "context": f"The real issue: {_source_title_fragment(anchor, 'why this matters', 34)}",
             "framework": f"How it works: {_source_title_fragment(anchor, 'mechanism', 34)}",
             "evidence": f"Evidence map: {_source_title_fragment(evidence, 'proof', 34)}",
@@ -2373,7 +2513,7 @@ def _source_slide_key_point(
     else:
         mapping = {
             "cover": f"Core claim: {source_profile.thesis}",
-            "agenda": "Narrative path: define the question, explain the mechanism and evidence, then turn the conclusion into action.",
+            "agenda": f"Decision path: {flow}",
             "context": f"Question: {anchor}",
             "framework": f"Mechanism: {anchor}",
             "evidence": f"Evidence: {evidence}",
@@ -2579,6 +2719,65 @@ def _section_items(text: str, heading: str) -> list[str]:
             stripped = stripped[1:].strip()
         items.append(stripped)
     return [item for item in items if item][:10]
+
+
+def _ascii_section_items(text: str, heading: str) -> list[str]:
+    """Read either ``Heading: value`` or a bullet block under ``Heading:``."""
+
+    lines = text.splitlines()
+    start = -1
+    inline_value = ""
+    prefix = f"{heading}:"
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.casefold() == prefix.casefold():
+            start = index
+            break
+        if stripped.casefold().startswith(prefix.casefold()):
+            start = index
+            inline_value = stripped[len(prefix) :].strip()
+            break
+    if start < 0:
+        return []
+
+    items = [inline_value] if inline_value else []
+    for line in lines[start + 1 :]:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if re.match(r"^[A-Za-z][A-Za-z0-9 /&_-]{1,40}:\s*", stripped) and not stripped.startswith(
+            ("-", "*", "•")
+        ):
+            break
+        if stripped.startswith(("-", "*", "•")):
+            stripped = stripped[1:].strip()
+        elif items:
+            break
+        items.append(stripped)
+    return [item for item in items if item][:10]
+
+
+def _summary_sentence_points(text: str) -> list[str]:
+    """Recover meaningful claims from an unstructured English source summary."""
+
+    cleaned = re.sub(
+        r"(?im)^\s*(?:core theme|title|article thesis|thesis|key point|key argument)\s*:\s*",
+        "",
+        text,
+    )
+    candidates = re.split(r"(?:\r?\n)+|(?<=[.!?])\s+", cleaned)
+    points: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        value = candidate.strip().lstrip("-*• ").strip()
+        if len(value) < 16 or value.endswith(":"):
+            continue
+        value = _clip_text(value, 220)
+        fingerprint = re.sub(r"\W+", "", value).casefold()
+        if fingerprint and fingerprint not in seen:
+            points.append(value)
+            seen.add(fingerprint)
+    return points[:12]
 
 
 def _first_sentence(text: str) -> str:

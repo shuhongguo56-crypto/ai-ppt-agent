@@ -668,6 +668,8 @@ def _recommended_direction_ids(outline: OutlineDecision) -> list[str]:
     # frequently contain incidental words such as "cell" or "health" in source
     # metadata; a deck explicitly about AI in higher education must not inherit
     # a biomedical art direction as a side effect of that background material.
+    if outline.deck_type == "course_presentation" and outline.language == "zh":
+        return ["workshop_playbook", "classroom_friendly", "data_story"]
     if _is_ai_education_content(content):
         return ["research_journal", "data_story", "academic_clean"]
     if _contains_any(content, ["crispr", "gene", "genome", "基因", "生物", "医学", "医疗", "药物", "健康", "细胞", "蛋白"]):

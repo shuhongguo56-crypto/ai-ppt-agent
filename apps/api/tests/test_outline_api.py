@@ -1,4 +1,5 @@
 from copy import deepcopy
+import re
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -132,6 +133,72 @@ def test_generate_outline_creates_draft_checkpoint(client) -> None:
     assert outline["slides"][0]["purpose"] == "cover"
     assert outline["slides"][-1]["purpose"] == "conclusion"
     assert outline["generatedBy"]["skillName"] == "HumanizePPT"
+
+
+def test_plain_english_source_pack_builds_a_decision_story_instead_of_repeating_labels(
+    client,
+) -> None:
+    project = PROJECT | {
+        "projectId": "plain-english-source",
+        "deckType": "business_pitch",
+        "topic": "Scaling a shared-services operating model with measurable control",
+        "audience": "Executive leadership",
+        "agentMode": "research",
+    }
+    assert create_project(client, project).status_code == 201
+    summary = "\n".join(
+        [
+            "Core theme: Scaling a shared-services operating model with measurable control",
+            "Article thesis: Shared services create durable value only when workflow ownership, operating evidence, and governance controls scale together.",
+            "Central question: How can leaders move from isolated pilots to a repeatable operating system?",
+            "Why now: Pilot activity is rising faster than evidence of measurable business impact.",
+            "Mechanism: Select one workflow, define a baseline, assign an owner, instrument quality and cycle time, then expand only after the gate is met.",
+            "Risk boundary: Output speed is not proof of value, and unreviewed automation can move errors downstream.",
+            "Action for audience: Run a 90-day controlled pilot with one accountable owner, three agreed metrics, and a scale, redesign, or stop decision gate.",
+            "Key arguments:",
+            "- Fragmented pilots create activity without an operating model.",
+            "- High-value use cases combine repeatability, measurable friction, and safe human review.",
+            "- Governance should be embedded in workflow design rather than added after deployment.",
+            "Recommended PPT flow:",
+            "- Establish the executive decision and evidence gap.",
+            "- Map the operating mechanism and risk boundary.",
+            "- Close with the 90-day pilot and scale gate.",
+        ]
+    )
+    source_pack = {
+        "schemaVersion": "1.0.0",
+        "projectId": project["projectId"],
+        "sources": [
+            {
+                "schemaVersion": "1.0.0",
+                "sourceId": "uploaded-executive-note",
+                "sourceType": "text",
+                "title": "Executive AI operating note",
+                "summary": summary,
+            }
+        ],
+    }
+
+    response = generate_outline(
+        client,
+        project["projectId"],
+        body={"sourcePack": source_pack},
+    )
+
+    assert response.status_code == 200
+    slides = response.json()["outlineDecision"]["slides"]
+    visible = " ".join(
+        text
+        for slide in slides
+        for text in [slide["title"], slide["keyPoint"], *slide["talkingPoints"]]
+    )
+    assert "Core claim: Article thesis" not in visible
+    assert "From question to action" not in visible
+    assert "90-day controlled pilot" in visible
+    assert "Evidence boundary:" in visible
+    assert "scale, redesign, or stop" in visible
+    assert len({slide["keyPoint"].casefold() for slide in slides}) == len(slides)
+    assert not any(re.search(r"[\u3400-\u9fff]", slide["title"]) for slide in slides)
 
 
 def test_topic_only_outline_researches_public_sources_before_generation(

@@ -18,6 +18,21 @@ PROJECT = {
 }
 
 
+def test_source_quality_rechecks_pixels_instead_of_trusting_generated_metadata(monkeypatch, tmp_path) -> None:
+    from app.services import render
+
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "image.png").write_bytes(b"image")
+    (assets / "slide-1-asset.json").write_text(json.dumps({
+        "sourceType": "free_ai_fallback", "mimeType": "image/png", "fileName": "image.png",
+    }))
+    monkeypatch.setattr(render, "_image_has_excessive_visible_text", lambda _path: True)
+    result = quality_service._visual_asset_source_quality(tmp_path, 1)
+    assert result["passed"] is False
+    assert "watermark" in result["issues"][0]
+
+
 def test_quality_flags_outline_scaffold_in_customer_visible_copy() -> None:
     issues = quality_service._internal_copy_issues(
         "第四部分：迁移方法\n"
@@ -140,6 +155,7 @@ def test_quality_check_passes_for_rendered_artifacts(client) -> None:
         "pptx_foreground_bounds",
         "pptx_text_fit_estimate",
         "pptx_layout_discipline",
+        "pptx_executive_readability",
         "pptx_visible_copy_hygiene",
         "pptx_visible_copy_completeness",
         "pptx_text_encoding_integrity",
@@ -168,6 +184,7 @@ def test_quality_check_passes_for_rendered_artifacts(client) -> None:
         "research_visual_delivery_contract",
         "customer_delivery_readiness",
         "competition_ppt_baseline",
+        "fortune_500_delivery_contract",
         "enterprise_ppt_baseline",
     }
 

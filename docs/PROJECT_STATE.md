@@ -1,5 +1,27 @@
 # AI PPT Agent Project State
 
+## 2026-09-14 regression and PowerPoint verification — goal remains active
+
+- Broad API regression found 3 failures among 372 tests: architectural-cover title/subtitle overlap blocked export, proof-mosaic lead text could clip in the Ollama workflow, and a repair test still expected the old prompt-contract phrase.
+- Fixed cover group positioning using measured text heights, removed intersecting cover ornament lines, increased the proof lead frame within available space, and aligned the contract test with the current canonical suffix. All three failing cases passed targeted reruns; the final cover export case also passed after ornament cleanup.
+- TypeScript typecheck and Next.js production build passed.
+- Complete repository regression (API, shared contracts, and integration tests): 418 passed in 229.25 seconds. Final cover ornament adjustment was additionally verified by the export test and actual PowerPoint rendering.
+- PowerPoint opened both repaired 8-slide regression files without a repair prompt and exported all 16 pages at 1920x1080. Inspected cover slide 1 and evidence slide 5; text is complete and the cover subtitle no longer intersects a decorative line. Outputs: `D:\Codex\Outputs\ppt-layout-regression-20260914`. These use fake-provider test imagery and are NOT customer visual acceptance samples.
+- Runtime probe: `http://127.0.0.1:8000/api/runtime/status` unavailable. Saved public origin remains an old quick-tunnel URL and is not evidence of current availability. No new public deployment performed.
+
+## 2026-09-13 active delivery audit — not complete
+
+- Current uncommitted work adds boardroom readability/layout checks, aspect-fill image crops, English SourcePack parsing, and concrete enterprise-AI image story beats. Focused outline/render/quality regression before the watermark fix: 105 passed.
+- Real end-to-end candidate: `D:\Codex\Outputs\HumanizePPT-Fortune500-Quality-20260913-v10-semantic-ai`. Nine PPTX/HTML slides share the canonical deck; raster overflow test passed. However, human inspection rejected its weakly related imagery and visible provider watermarks. The earlier zero-failure report is NOT delivery evidence.
+- Pollinations anonymous generation returned images despite `nologo=true`, including visible provider logos. The modern official API documents authentication. Do not promise anonymous, watermark-free enterprise image delivery based on the legacy endpoint.
+- Fixed short provider-watermark detection below the general 40-character OCR threshold. Final source quality now scans image pixels again instead of trusting generated-source metadata. Rechecking the v10 candidate fails source quality on six slides (1, 2, 3, 4, 7, 8). OCR is still optional and incomplete, so remaining images require visual review.
+- Post-fix render/quality regression: 84 passed in 85.67 seconds. `git diff --check` passed.
+- Calibration of shorter licensed-photo queries retrieved the same unsuitable Commons photograph repeatedly; direct Openverse calibration returned no usable result. This remains an unresolved sourcing/relevance gap, not proof of successful image search.
+- Follow-up diagnosed query collapse: concise requests such as `industrial control room operator` were preceded by the same generic `business strategy meeting` query. Concrete short queries now run first. Commons/Openverse now skip excluded image hashes inside their candidate lists and try the next download instead of repeatedly returning an already-used first image. Render regression: 66 passed. A real control-room search returned no accepted image within its bounded budget; sourcing quality remains incomplete.
+- Further sourcing repair: Commons relevance/ranking reads scene descriptions and categories instead of matching artist/licence text. Commons/Openverse continue after individual download errors. Render regression: 67 passed. Real Commons download succeeded at `D:\Codex\Outputs\open-image-search-calibration\slide-11-commons.jpg` (2119x1415, control-room operator portrait, attribution PEO ACWA / CC BY 2.0). Visually inspected: relevant to the requested location but a posed portrait, not yet strong evidence for the enterprise-AI supervision claim. Do not substitute this sourcing probe for a completed delivery sample.
+- Hardware probe found an NVIDIA RTX 5060 Laptop GPU with 8151 MiB VRAM; no local image model has been installed or validated in this audit.
+- Remaining completion work: reliable relevant watermark-free assets, full regression, Chinese and English visual review, real PowerPoint playback, and current public runtime verification. Goal remains active. No deployment of this rejected sample has been performed.
+
 ## 2026-08-14 composition-discipline and visual-delivery closure
 
 - Research/enterprise PPTX rendering now favors one intentional composition per page instead of stacking repeated UI-style cards. Cover, chapter, editorial, statement, proof, system-map, priority, horizon, and closing pages use distinct spatial structures while staying inside the 16:9 safe area.

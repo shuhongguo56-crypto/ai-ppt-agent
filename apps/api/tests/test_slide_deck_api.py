@@ -631,7 +631,7 @@ def test_quality_repair_keeps_one_valid_deck_contract_and_increases_visual_varie
         lowered = item.prompt.casefold()
         assert "award-winning" in lowered
         assert "single focal" in lowered
-        assert lowered.count("award-winning corporate presentation standard") == 1
+        assert lowered.count("award-winning fortune 500 corporate presentation standard") == 1
     assert all(len(slide.title) <= 54 for slide in repaired.slides)
     assert all(
         not re.search(r"(?:…|\.{3})$", block.content.strip())
