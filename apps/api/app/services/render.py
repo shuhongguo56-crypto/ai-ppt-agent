@@ -1064,14 +1064,8 @@ def _search_openverse_visual_asset(
             key=lambda item: _openverse_candidate_score(item, query),
             reverse=True,
         )
-        # Openverse ranks a broad visual set deterministically.  Rotate the
-        # relevant candidate pool by page so a repeated high-level subject
-        # (for example, several university-learning pages) does not select the
-        # same first thumbnail on every slide before the cross-slide hash gate
-        # gets an opportunity to repair it.
-        if ordered:
-            offset = (max(1, slide_index) - 1) % len(ordered)
-            ordered = ordered[offset:] + ordered[:offset]
+        # Keep semantic rank intact. Cross-slide exclusions select the next
+        # eligible photograph; page number must never promote a weaker match.
         for item in ordered:
             if "modern" in query.casefold() and not _candidate_metadata_is_relevant(
                 str(item.get("title") or ""), query
@@ -1539,9 +1533,7 @@ def _search_commons_visual_asset(
             ),
             reverse=True,
         )
-        if ordered_candidates:
-            offset = (max(1, slide_index) - 1) % len(ordered_candidates)
-            ordered_candidates = ordered_candidates[offset:] + ordered_candidates[:offset]
+        # Duplicates are excluded below without changing relevance order.
         for page, image_info, _candidate_metadata in ordered_candidates:
             mime_type = str(image_info.get("mime") or "")
             image_url = str(image_info.get("url") or "")

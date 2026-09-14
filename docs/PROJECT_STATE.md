@@ -2,6 +2,8 @@
 
 ## 2026-09-14 regression and PowerPoint verification — goal remains active
 
+- Removed page-number rotation of ranked Commons/Openverse candidates: best semantic matches retain priority, with cross-slide exclusions supplying variety. Render regression: 68 passed. Fresh three-query Commons probe returned no accepted assets; records saved under `D:\Codex\Outputs\image-ranking-review-20260914`. Stable production sourcing remains unresolved.
+
 - Broad API regression found 3 failures among 372 tests: architectural-cover title/subtitle overlap blocked export, proof-mosaic lead text could clip in the Ollama workflow, and a repair test still expected the old prompt-contract phrase.
 - Fixed cover group positioning using measured text heights, removed intersecting cover ornament lines, increased the proof lead frame within available space, and aligned the contract test with the current canonical suffix. All three failing cases passed targeted reruns; the final cover export case also passed after ornament cleanup.
 - TypeScript typecheck and Next.js production build passed.

@@ -1030,6 +1030,34 @@ def test_concrete_business_photo_query_is_not_replaced_by_generic_meeting() -> N
         assert render_service._image_search_queries(query, "business_scene")[0] == query
 
 
+def test_image_search_keeps_best_semantic_match_on_later_slides(tmp_path, monkeypatch) -> None:
+    metadata = [
+        {"title": "Business workshop factory operations team", "url": "https://example.com/best.jpg", "width": 1920, "height": 1080},
+        {"title": "Business workshop portrait", "url": "https://example.com/weak.jpg", "width": 1920, "height": 1080},
+    ]
+    pages = {
+        str(index): {"title": item["title"], "imageinfo": [{**item, "mime": "image/jpeg", "size": 10000}]}
+        for index, item in enumerate(metadata)
+    }
+    monkeypatch.setattr(render_service, "_read_json_url", lambda url, **_kwargs: (
+        {"results": metadata} if "openverse" in url else {"query": {"pages": pages}}
+    ))
+    monkeypatch.setattr(render_service, "_image_has_excessive_visible_text", lambda _path: False)
+    downloads = []
+
+    def download(url, path, **_kwargs):
+        downloads.append(url)
+        path.write_bytes(b"photo")
+        return "image/jpeg"
+
+    monkeypatch.setattr(render_service, "_download_binary", download)
+    for searcher in (render_service._search_commons_visual_asset, render_service._search_openverse_visual_asset):
+        asset = searcher(2, "business workshop operations team", tmp_path, image_type="business_scene",
+                         purpose="Team coordinates operations", prompt="Operations workshop", provider_chain=[], timeout_seconds=1)
+        assert asset is not None
+        assert downloads[-1].endswith("best.jpg")
+
+
 def test_commons_uses_scene_description_and_recovers_from_broken_first_download(tmp_path, monkeypatch) -> None:
     pages = {
         str(index): {"title": f"File:IMG_00{index}.jpg", "imageinfo": [{
